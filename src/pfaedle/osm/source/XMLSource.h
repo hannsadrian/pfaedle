@@ -27,6 +27,11 @@ class XMLSource : public OsmSource {
   virtual void seekNodes();
   virtual void seekWays();
   virtual void seekRels();
+
+  virtual util::geo::Box<double> getBounds();
+
+  virtual std::string decode(const char* str) const;
+  virtual std::string decode(const std::string& str) const;
  private:
   std::string _path;
   OsmSourceNode _curNode;

@@ -162,3 +162,59 @@ const OsmSourceAttr XMLSource::nextAttr() {
 
   return {0, 0};
 }
+
+
+// _____________________________________________________________________________
+util::geo::Box<double> XMLSource::getBounds() {
+  _xml.reset();
+  while (_xml.next() && strcmp(_xml.get().name, "node")) {}
+
+  const pfxml::tag& cur = _xml.get();
+
+  if (strcmp(cur.name, "bounds") != 0) {
+    throw pfxml::parse_exc(
+        std::string("Could not find required <bounds> tag"), _path, 0, 0, 0);
+  }
+
+  if (!cur.attr("minlat")) {
+    throw pfxml::parse_exc(
+        std::string(
+            "Could not find required attribute \"minlat\" for <bounds> tag"),
+        _path, 0, 0, 0);
+  }
+  if (!cur.attr("minlon")) {
+    throw pfxml::parse_exc(
+        std::string(
+            "Could not find required attribute \"minlon\" for <bounds> tag"),
+        _path, 0, 0, 0);
+  }
+  if (!cur.attr("maxlat")) {
+    throw pfxml::parse_exc(
+        std::string(
+            "Could not find required attribute \"maxlat\" for <bounds> tag"),
+        _path, 0, 0, 0);
+  }
+  if (!cur.attr("maxlon")) {
+    throw pfxml::parse_exc(
+        std::string(
+            "Could not find required attribute \"maxlon\" for <bounds> tag"),
+        _path, 0, 0, 0);
+  }
+
+  double minlat = atof(cur.attr("minlat"));
+  double minlon = atof(cur.attr("minlon"));
+  double maxlat = atof(cur.attr("maxlat"));
+  double maxlon = atof(cur.attr("maxlon"));
+
+  return util::geo::Box<double>({minlon, minlat}, {maxlon, maxlat});
+}
+
+// _____________________________________________________________________________
+std::string XMLSource::decode(const char* str) const {
+  return pfxml::file::decode(str);
+}
+
+// _____________________________________________________________________________
+std::string XMLSource::decode(const std::string& str) const {
+  return pfxml::file::decode(str);
+}

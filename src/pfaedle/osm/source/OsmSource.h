@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <vector>
+#include "util/geo/Geo.h"
 
 namespace pfaedle {
 namespace osm {
@@ -47,9 +48,14 @@ class OsmSource {
   virtual const OsmSourceRelation* nextRel() = 0;
   virtual void cont() = 0;
 
+  virtual util::geo::Box<double> getBounds() = 0;
+
   virtual void seekNodes() = 0;
   virtual void seekWays() = 0;
   virtual void seekRels() = 0;
+
+  virtual std::string decode(const char* str) const = 0;
+  virtual std::string decode(const std::string& str) const = 0;
 };
 
 }  // namespace source

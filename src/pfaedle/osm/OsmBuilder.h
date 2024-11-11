@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
 #include "ad/cppgtfs/gtfs/Feed.h"
 #include "pfaedle/Def.h"
 #include "pfaedle/osm/BBoxIdx.h"
@@ -18,15 +19,14 @@
 #include "pfaedle/osm/OsmIdSet.h"
 #include "pfaedle/osm/OsmReadOpts.h"
 #include "pfaedle/osm/Restrictor.h"
+#include "pfaedle/osm/source/XMLSource.h"
 #include "pfaedle/router/Router.h"
 #include "pfaedle/trgraph/Graph.h"
 #include "pfaedle/trgraph/Normalizer.h"
 #include "pfaedle/trgraph/StatInfo.h"
 #include "util/Nullable.h"
-#include "pfaedle/osm/source/XMLSource.h"
 #include "util/geo/Geo.h"
 #include "util/xml/XmlWriter.h"
-#include "pfxml/pfxml.h"
 
 namespace pfaedle {
 namespace osm {
@@ -107,12 +107,12 @@ class OsmBuilder {
 
  private:
   void readBBoxNds(source::OsmSource* source, OsmIdSet* nodes,
-                                  OsmIdSet* noHupNodes, const OsmFilter& filter,
-                                  const BBoxIdx& bbox) const;
+                   OsmIdSet* noHupNodes, const OsmFilter& filter,
+                   const BBoxIdx& bbox) const;
 
-  void readRels(source::OsmSource* source, RelLst* rels, RelMap* nodeRels, RelMap* wayRels,
-                const OsmFilter& filter, const AttrKeySet& keepAttrs,
-                Restrictions* rests) const;
+  void readRels(source::OsmSource* source, RelLst* rels, RelMap* nodeRels,
+                RelMap* wayRels, const OsmFilter& filter,
+                const AttrKeySet& keepAttrs, Restrictions* rests) const;
 
   void readRestr(const OsmRel& rel, Restrictions* rests,
                  const OsmFilter& filter) const;
@@ -129,11 +129,11 @@ class OsmBuilder {
                     const OsmIdSet& bBoxNodes, NIdMap* nodes,
                     const AttrKeySet& keepAttrs, const FlatRels& f) const;
 
-  void readWriteWays(source::OsmSource* source, util::xml::XmlWriter* o, OsmIdList* ways,
-                     const AttrKeySet& keepAttrs) const;
+  void readWriteWays(source::OsmSource* source, util::xml::XmlWriter* o,
+                     OsmIdList* ways, const AttrKeySet& keepAttrs) const;
 
-  void readWriteRels(source::OsmSource* source, util::xml::XmlWriter* o, OsmIdList* ways,
-                     NIdMap* nodes, const OsmFilter& filter,
+  void readWriteRels(source::OsmSource* source, util::xml::XmlWriter* o,
+                     OsmIdList* ways, NIdMap* nodes, const OsmFilter& filter,
                      const AttrKeySet& keepAttrs);
 
   void readEdges(source::OsmSource* source, Graph* g, const RelLst& rels,
@@ -159,10 +159,10 @@ class OsmBuilder {
   OsmWay nextWayWithId(source::OsmSource* source, osmid wid,
                        const AttrKeySet& keepAttrs) const;
 
-  OsmNode nextNode(source::OsmSource* source, NIdMap* nodes, NIdMultMap* multNodes,
-                   const RelMap& nodeRels, const OsmFilter& filter,
-                   const OsmIdSet& bBoxNodes, const AttrKeySet& keepAttrs,
-                   const FlatRels& flatRels) const;
+  OsmNode nextNode(source::OsmSource* source, NIdMap* nodes,
+                   NIdMultMap* multNodes, const RelMap& nodeRels,
+                   const OsmFilter& filter, const OsmIdSet& bBoxNodes,
+                   const AttrKeySet& keepAttrs, const FlatRels& flatRels) const;
 
   bool keepNode(const OsmNode& n, const NIdMap& nodes,
                 const NIdMultMap& multNodes, const RelMap& nodeRels,
@@ -175,7 +175,8 @@ class OsmBuilder {
  protected:
   Nullable<StatInfo> getStatInfo(osmid nid, const AttrMap& m,
                                  const RelMap& nodeRels, const RelLst& rels,
-                                 const OsmReadOpts& ops) const;
+                                 const OsmReadOpts& ops,
+                                 const source::OsmSource* source) const;
 
   static void snapStats(const OsmReadOpts& opts, Graph* g, const BBoxIdx& bbox,
                         double gridSize, Restrictor* res,
@@ -225,7 +226,8 @@ class OsmBuilder {
 
   std::vector<TransitEdgeLine*> getLines(const std::vector<size_t>& edgeRels,
                                          const RelLst& rels,
-                                         const OsmReadOpts& ops);
+                                         const OsmReadOpts& ops,
+                                         const source::OsmSource* source);
 
   void getKeptAttrKeys(const OsmReadOpts& opts, AttrKeySet sets[3]) const;
 
@@ -234,14 +236,13 @@ class OsmBuilder {
 
   std::string getAttrByFirstMatch(const DeepAttrLst& rule, osmid id,
                                   const AttrMap& attrs, const RelMap& entRels,
-                                  const RelLst& rels,
-                                  const Normalizer& norm) const;
+                                  const RelLst& rels, const Normalizer& norm,
+                                  const source::OsmSource* source) const;
 
-  std::vector<std::string> getAttrMatchRanked(const DeepAttrLst& rule, osmid id,
-                                              const AttrMap& attrs,
-                                              const RelMap& entRels,
-                                              const RelLst& rels,
-                                              const Normalizer& norm) const;
+  std::vector<std::string> getAttrMatchRanked(
+      const DeepAttrLst& rule, osmid id, const AttrMap& attrs,
+      const RelMap& entRels, const RelLst& rels, const Normalizer& norm,
+      const source::OsmSource* source) const;
 
   std::string getAttr(const DeepAttrRule& s, osmid id, const AttrMap& attrs,
                       const RelMap& entRels, const RelLst& rels) const;
