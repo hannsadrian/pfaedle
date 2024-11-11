@@ -15,6 +15,19 @@ using pfaedle::osm::source::OsmSourceAttr;
 
 // _____________________________________________________________________________
 XMLSource::XMLSource(const std::string& path) : _path(path), _xml(path) {
+  // init states
+  _start = _xml.state();
+  _nodeBeg = _xml.state();
+  _wayBeg = _xml.state();
+  _relBeg = _xml.state();
+
+  // seek node begin
+  seekNodes();
+
+  // set individual states to node begin
+  _nodeBeg = _xml.state();
+  _wayBeg = _xml.state();
+  _relBeg = _xml.state();
 }
 
 // _____________________________________________________________________________
@@ -27,7 +40,11 @@ const OsmSourceNode* XMLSource::nextNode() {
 
     if (_inNodeBlock) {
       // block ended
-      if (strcmp(cur.name, "node")) return 0;
+      if (strcmp(cur.name, "node")) {
+        _wayBeg = _xml.state();
+        return 0;
+      }
+
       _curNode.lon = util::atof(cur.attr("lon"), 7);
       _curNode.lat = util::atof(cur.attr("lat"), 7);
 
@@ -35,7 +52,6 @@ const OsmSourceNode* XMLSource::nextNode() {
 
       return &_curNode;
     }
-
   } while (_xml.next());
 
   return 0;
@@ -43,20 +59,20 @@ const OsmSourceNode* XMLSource::nextNode() {
 
 // _____________________________________________________________________________
 void XMLSource::seekNodes() {
-  _xml.reset();
-  while (_xml.next() && strcmp(_xml.get().name, "node")) {}
+  _xml.set_state(_nodeBeg);
+  while (strcmp(_xml.get().name, "node") && _xml.next()) {}
 }
 
 // _____________________________________________________________________________
 void XMLSource::seekWays() {
-  _xml.reset();
-  while (_xml.next() && strcmp(_xml.get().name, "way")) {}
+  _xml.set_state(_wayBeg);
+  while (strcmp(_xml.get().name, "way") && _xml.next()) {}
 }
 
 // _____________________________________________________________________________
 void XMLSource::seekRels() {
-  _xml.reset();
-  while (_xml.next() && strcmp(_xml.get().name, "relation")) {}
+  _xml.set_state(_relBeg);
+  while (strcmp(_xml.get().name, "relation") && _xml.next()) {}
 }
 
 // _____________________________________________________________________________
@@ -74,7 +90,10 @@ const OsmSourceWay* XMLSource::nextWay() {
 
     if (_inWayBlock) {
       // block ended
-      if (strcmp(cur.name, "way")) return 0;
+      if (strcmp(cur.name, "way")) {
+        _relBeg = _xml.state();
+        return 0;
+      }
       _curWay.id = util::atoul(cur.attr("id"));
 
       return &_curWay;
@@ -166,7 +185,8 @@ const OsmSourceAttr XMLSource::nextAttr() {
 
 // _____________________________________________________________________________
 util::geo::Box<double> XMLSource::getBounds() {
-  _xml.reset();
+  _xml.set_state(_start);
+
   while (_xml.next() && strcmp(_xml.get().name, "node")) {}
 
   const pfxml::tag& cur = _xml.get();

@@ -41,6 +41,11 @@ class XMLSource : public OsmSource {
 
   pfxml::file _xml;
 
+  pfxml::parser_state _start;
+  pfxml::parser_state _nodeBeg;
+  pfxml::parser_state _wayBeg;
+  pfxml::parser_state _relBeg;
+
   bool _inNodeBlock = false;
   bool _inWayBlock = false;
   bool _inRelBlock = false;
