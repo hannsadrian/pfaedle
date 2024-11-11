@@ -108,14 +108,12 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
     //    * have been used in a way in pass 3
 
     LOG(DEBUG) << "Reading bounding box nodes...";
-    skipUntil(&xml, "node");
     pfxml::parser_state nodeBeg = xml.state();
     // pfxml::parser_state edgesBeg =
         // readBBoxNds(source, &bboxNodes, &noHupNodes, filter, bbox);
     readBBoxNds(source, &bboxNodes, &noHupNodes, filter, bbox);
 
     LOG(DEBUG) << "Reading relations...";
-    // skipUntil(&xml, "relation");
     readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
              &rawRests);
 
@@ -125,7 +123,6 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
               opts);
 
     LOG(DEBUG) << "Reading kept nodes...";
-    xml.set_state(nodeBeg);
     readNodes(source, g, intmRels, nodeRels, filter, bboxNodes, &nodes,
               &multNodes, &orphanStations, attrKeys[0], intmRels.flat, opts);
   }
@@ -343,8 +340,6 @@ void OsmBuilder::filterWrite(const std::string& in, const std::string& out,
   BBoxIdx latLngBox = box;
 
   if (latLngBox.size() == 0) {
-    skipUntil(&xml, "bounds");
-
     const pfxml::tag& cur = xml.get();
 
     if (strcmp(cur.name, "bounds") != 0) {
@@ -408,8 +403,6 @@ void OsmBuilder::filterWrite(const std::string& in, const std::string& out,
     filter = filter.merge(OsmFilter(o.keepFilter, o.dropFilter));
   }
 
-  skipUntil(&xml, "node");
-  pfxml::parser_state nodeBeg = xml.state();
   readBBoxNds(source, &bboxNodes, &noHupNodes, filter, latLngBox);
 
   readRels(source, &rels, &nodeRels, &wayRels, filter, attrKeys[2], &rests);
@@ -422,7 +415,6 @@ void OsmBuilder::filterWrite(const std::string& in, const std::string& out,
   readWriteWays(source, &wr, &ways, attrKeys[1]);
 
   std::sort(ways.begin(), ways.end());
-  // skipUntil(&xml, "relation");
   readWriteRels(source, &wr, &ways, &nodes, filter, attrKeys[2]);
 
   wr.closeTags();
@@ -600,12 +592,6 @@ OsmWay OsmBuilder::nextWayWithId(OsmSource* source, osmid wid,
   }
 
   return OsmWay();
-}
-
-// _____________________________________________________________________________
-void OsmBuilder::skipUntil(pfxml::file* xml, const std::string& s) const {
-  while (xml->next() && strcmp(xml->get().name, s.c_str())) {
-  }
 }
 
 // _____________________________________________________________________________

@@ -44,16 +44,19 @@ const OsmSourceNode* XMLSource::nextNode() {
 // _____________________________________________________________________________
 void XMLSource::seekNodes() {
   _xml.reset();
+  while (_xml.next() && strcmp(_xml.get().name, "node")) {}
 }
 
 // _____________________________________________________________________________
 void XMLSource::seekWays() {
   _xml.reset();
+  while (_xml.next() && strcmp(_xml.get().name, "way")) {}
 }
 
 // _____________________________________________________________________________
 void XMLSource::seekRels() {
   _xml.reset();
+  while (_xml.next() && strcmp(_xml.get().name, "relation")) {}
 }
 
 // _____________________________________________________________________________
@@ -92,9 +95,10 @@ const OsmSourceRelationMember* XMLSource::nextMember() {
     if (strcmp(cur.name, "member") == 0) {
       _curMember.id = util::atoul(cur.attr("ref"));
       _curMember.type = 0;
-      if (strcmp(cur.attr("ref"), "way") == 0) _curMember.type = 1;
-      else if (strcmp(cur.attr("ref"), "relation") == 0) _curMember.type = 2;
+      if (strcmp(cur.attr("type"), "way") == 0) _curMember.type = 1;
+      else if (strcmp(cur.attr("type"), "relation") == 0) _curMember.type = 2;
       _curMember.role = cur.attr("role");
+      if (!_curMember.role) _curMember.role = "";
       return &_curMember;
     } else {
       return 0;

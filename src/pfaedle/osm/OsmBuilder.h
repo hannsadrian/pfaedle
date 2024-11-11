@@ -229,8 +229,6 @@ class OsmBuilder {
 
   void getKeptAttrKeys(const OsmReadOpts& opts, AttrKeySet sets[3]) const;
 
-  void skipUntil(pfxml::file* xml, const std::string& s) const;
-
   void processRestr(osmid nid, osmid wid, const Restrictions& rawRests, Edge* e,
                     Node* n, Restrictor* restor) const;
 
