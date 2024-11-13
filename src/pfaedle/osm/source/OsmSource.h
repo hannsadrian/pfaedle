@@ -48,6 +48,8 @@ class OsmSource {
   virtual const OsmSourceRelation* nextRel() = 0;
   virtual void cont() = 0;
 
+  virtual ~OsmSource() {};
+
   virtual util::geo::Box<double> getBounds() = 0;
 
   virtual void seekNodes() = 0;

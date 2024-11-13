@@ -21,6 +21,7 @@
 #include "pfaedle/osm/OsmBuilder.h"
 #include "pfaedle/osm/OsmFilter.h"
 #include "pfaedle/osm/Restrictor.h"
+#include "pfaedle/osm/source/PBFSource.h"
 #include "pfaedle/osm/source/XMLSource.h"
 #include "util/Misc.h"
 #include "util/Nullable.h"
@@ -41,6 +42,7 @@ using pfaedle::osm::source::OsmSourceNode;
 using pfaedle::osm::source::OsmSourceRelation;
 using pfaedle::osm::source::OsmSourceRelationMember;
 using pfaedle::osm::source::OsmSourceWay;
+using pfaedle::osm::source::PBFSource;
 using pfaedle::osm::source::XMLSource;
 using pfaedle::trgraph::Component;
 using pfaedle::trgraph::Edge;
@@ -87,8 +89,13 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
     getKeptAttrKeys(opts, attrKeys);
 
     OsmFilter filter(opts);
+    OsmSource* source;
 
-    OsmSource* source = new XMLSource(path);
+    if (util::endsWith(path, ".pbf")) {
+      source = new PBFSource(path);
+    } else {
+      source = new XMLSource(path);
+    }
 
     // we do four passes of the file here to be as memory creedy as possible:
     // - the first pass collects all node IDs which are
@@ -119,6 +126,8 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
     LOG(DEBUG) << "Reading kept nodes...";
     readNodes(source, g, intmRels, nodeRels, filter, bboxNodes, &nodes,
               &multNodes, &orphanStations, attrKeys[0], intmRels.flat, opts);
+
+    delete source;
   }
 
   LOG(DEBUG) << "OSM ID set lookups: " << osm::OsmIdSet::LOOKUPS
@@ -327,7 +336,13 @@ void OsmBuilder::filterWrite(const std::string& in, const std::string& out,
   // always empty
   NIdMultMap multNodes;
 
-  OsmSource* source = new XMLSource(in);
+  OsmSource* source;
+
+  if (util::endsWith(in, ".pbf")) {
+    source = new PBFSource(in);
+  } else {
+    source = new XMLSource(in);
+  }
 
   BBoxIdx latLngBox = box;
 
@@ -371,6 +386,8 @@ void OsmBuilder::filterWrite(const std::string& in, const std::string& out,
   readWriteRels(source, &wr, &ways, &nodes, filter, attrKeys[2]);
 
   wr.closeTags();
+
+  delete source;
 }
 
 // _____________________________________________________________________________
