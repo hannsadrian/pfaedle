@@ -507,6 +507,7 @@ void OsmBuilder::readBBoxNds(OsmSource* source, OsmIdSet* nodes,
   const OsmSourceNode* nd;
 
   while ((nd = source->nextNode())) {
+    std::cout << " GOT NODE " << nd->id << std::endl;
     if (bbox.contains(Point<double>(nd->lon, nd->lat))) {
       nodes->add(nd->id);
     } else {

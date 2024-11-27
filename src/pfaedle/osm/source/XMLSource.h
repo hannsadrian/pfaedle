@@ -22,7 +22,7 @@ class XMLSource : public OsmSource {
   virtual uint64_t nextMemberNode();
   virtual const OsmSourceRelationMember* nextMember();
   virtual const OsmSourceRelation* nextRel();
-  virtual void cont();
+  virtual bool cont();
 
   virtual void seekNodes();
   virtual void seekWays();

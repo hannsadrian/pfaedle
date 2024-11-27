@@ -6,7 +6,6 @@
 #include <unistd.h>
 
 #include "pfaedle/osm/source/PBFSource.h"
-#include "protozero/pbf_reader.hpp"
 #include "util/Misc.h"
 #ifndef PFXML_NO_ZLIB
 #include <zlib.h>
@@ -41,15 +40,15 @@ PBFSource::PBFSource(const std::string& path) : _path(path) {
   read(_file, _buf[_which], BUFFER_S);
   _c = _buf[_which];
 
+  // get header block
   getNextBlock();
 
-  getNextBlock();
-
-  exit(1);
+  // get first content block
+  checkGroup();
 }
 
 // _____________________________________________________________________________
-void PBFSource::getNextBlock() {
+bool PBFSource::getNextBlock() {
   // block begins by big-endian 32bit length of BlobHeader
   uint32_t blobHeaderLength = ((*(_c + 3)) << 0) | ((*(_c + 2)) << 8) |
                               ((*(_c + 1)) << 16) | ((*_c) << 24);
@@ -64,13 +63,15 @@ void PBFSource::getNextBlock() {
 
   if (header.type == "OSMHeader") {
     parseOSMHeader(parseBlob(header.datasize));
-    return;
+    return true;
   }
 
   if (header.type == "OSMData") {
-    parseOSMData(parseBlob(header.datasize));
-    return;
+    _curBlock = parseOSMData(parseBlob(header.datasize));
+    return true;
   }
+
+  return false;
 }
 
 // _____________________________________________________________________________
@@ -84,9 +85,10 @@ util::geo::Box<double> PBFSource::parseHeaderBBox(unsigned char*& c) {
     auto typeId = nextTypeAndId(c);
 
     if (typeId.second == 1) llx = parseVarInt(c);
-    if (typeId.second == 4) lly = parseVarInt(c);
-    if (typeId.second == 2) urx = parseVarInt(c);
-    if (typeId.second == 3) ury = parseVarInt(c);
+    else if (typeId.second == 4) lly = parseVarInt(c);
+    else if (typeId.second == 2) urx = parseVarInt(c);
+    else if (typeId.second == 3) ury = parseVarInt(c);
+    else skipType(typeId.first, c);
   }
 
   return {{llx * 1.0, lly * 1.0}, {urx * 1.0, ury * 1.0}};
@@ -105,8 +107,9 @@ PBFSource::PrimitiveBlock PBFSource::parseOSMData(const Blob& blob) {
     if (typeId.second == 1) {
       block.stringTable = parseStringTable(c);
     } else if (typeId.second == 2) {
-      block.primitiveGroups = c;
-      // TODO: skip
+      block.primitiveGroups.push(c);
+      size_t len = parseVarUInt(c);
+      c += len;
     } else if (typeId.second == 17) {
       block.granularity = parseVarUInt(c);
     } else if (typeId.second == 19) {
@@ -128,8 +131,6 @@ std::vector<std::string> PBFSource::parseStringTable(unsigned char *& c) {
   auto start = c;
 
   size_t len = parseVarUInt(c);
-
-  std::cout << len << std::endl;
 
   std::vector<std::string> table;
   table.reserve(len / 10);
@@ -297,7 +298,7 @@ uint64_t PBFSource::parseUInt(std::pair<VarType, uint8_t> typeId) {
 // _____________________________________________________________________________
 int64_t PBFSource::parseVarInt(unsigned char*& c) {
   int64_t i = parseVarUInt(c);
-  return (i << 1) ^ (i >> 31);
+  return (i >> 1) ^ (-(i & 1));
 }
 
 // _____________________________________________________________________________
@@ -389,7 +390,35 @@ PBFSource::~PBFSource() {
 }
 
 // _____________________________________________________________________________
-const OsmSourceNode* PBFSource::nextNode() { return 0; }
+const OsmSourceNode* PBFSource::nextNode() {
+  do {
+    if (_curBlock.denseNodePtr < _curBlock.curDenseNodes.size()) {
+      _curNode.id = _curBlock.curDenseNodes[_curBlock.denseNodePtr++].id;
+      return &_curNode;
+    }
+
+    auto typeId = nextTypeAndId(_curBlock.c);
+    if (typeId.second == 1) {
+      size_t len = parseVarUInt(_curBlock.c);
+      _curBlock.c += len;
+    } else if (typeId.second == 2) {
+      _curBlock.curDenseNodes = parseDenseNodes(_curBlock.c);
+      _curBlock.denseNodePtr = 0;
+
+      if (_curBlock.denseNodePtr < _curBlock.curDenseNodes.size()) {
+        _curNode.id = _curBlock.curDenseNodes[_curBlock.denseNodePtr++].id;
+        return &_curNode;
+      }
+    } else {
+      // ignore non-nodes here
+      size_t len = parseVarUInt(_curBlock.c);
+      _curBlock.c += len;
+
+    }
+  } while (checkGroup());
+
+  return 0;
+}
 
 // _____________________________________________________________________________
 void PBFSource::seekNodes() {}
@@ -401,7 +430,85 @@ void PBFSource::seekWays() {}
 void PBFSource::seekRels() {}
 
 // _____________________________________________________________________________
-void PBFSource::cont() {}
+bool PBFSource::checkGroup() {
+  while (true) {
+    // skip to first non-empty block
+    while (_curBlock.primitiveGroups.size() == 0 && getNextBlock()) {}
+
+    if (_curBlock.primitiveGroups.size() == 0) return false;
+
+    if (_curBlock.c == 0) {
+      _curBlock.c = _curBlock.primitiveGroups.front();
+      _curBlock.curGroupLen = parseVarUInt(_curBlock.c);
+      _curBlock.primitiveGroups.front() = _curBlock.c;
+
+      std::cout << "CUR GROUP LEN: " <<  _curBlock.curGroupLen << std::endl;
+    }
+
+    if ((size_t)(_curBlock.c - _curBlock.primitiveGroups.front()) >= _curBlock.curGroupLen) {
+      _curBlock.primitiveGroups.pop();
+      _curBlock.c = 0;
+      continue;
+    }
+
+    return true;
+  }
+}
+
+// _____________________________________________________________________________
+std::vector<PBFSource::Node> PBFSource::parseDenseNodes(unsigned char*& c) {
+  std::vector<PBFSource::Node> ret;
+
+  size_t len = parseVarUInt(c);
+  auto start = c;
+
+  while ((size_t)(c - start) < len) {
+    auto typeId = nextTypeAndId(c);
+
+    if (typeId.second == 1) {
+      // IDs
+      size_t len = parseVarUInt(c);
+      auto start = c;
+      size_t i = 0;
+      if (ret.size()) {
+        size_t i =0;
+        while ((size_t)(c - start) < len) {
+          auto nid = parseVarInt(c);
+          if (i > 0) nid = ret[i-1].id + nid;
+          ret[i++].id = nid;
+        }
+      } else {
+        while ((size_t)(c - start) < len) {
+          auto nid = parseVarInt(c);
+          if (ret.size() > 0) nid = ret.back().id + nid;
+          ret.push_back({0, 0, nid, {}});
+        }
+      }
+    } else if (typeId.second == 5) {
+      // denseinfo
+      size_t len = parseVarUInt(c);
+
+      c += len;
+    } else if (typeId.second == 8) {
+      // lat
+      size_t len = parseVarUInt(c);
+
+      c += len;
+    } else if (typeId.second == 9) {
+      // lon
+      size_t len = parseVarUInt(c);
+
+      c += len;
+    } else if (typeId.second == 10) {
+      // tags
+      size_t len = parseVarUInt(c);
+
+      c += len;
+    }
+  }
+
+  return ret;
+}
 
 // _____________________________________________________________________________
 const OsmSourceWay* PBFSource::nextWay() { return 0; }
@@ -416,7 +523,9 @@ uint64_t PBFSource::nextMemberNode() { return 0; }
 const OsmSourceRelation* PBFSource::nextRel() { return 0; }
 
 // _____________________________________________________________________________
-const OsmSourceAttr PBFSource::nextAttr() {}
+const OsmSourceAttr PBFSource::nextAttr() {
+  return {0, 0};
+}
 
 // _____________________________________________________________________________
 util::geo::Box<double> PBFSource::getBounds() {}

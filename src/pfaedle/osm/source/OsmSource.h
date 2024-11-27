@@ -46,7 +46,7 @@ class OsmSource {
   virtual uint64_t nextMemberNode() = 0;
   virtual const OsmSourceRelationMember* nextMember() = 0;
   virtual const OsmSourceRelation* nextRel() = 0;
-  virtual void cont() = 0;
+  virtual bool cont() = 0;
 
   virtual ~OsmSource() {};
 

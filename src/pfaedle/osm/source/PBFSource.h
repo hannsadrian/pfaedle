@@ -5,6 +5,7 @@
 #ifndef PFAEDLE_OSM_SOURCE_PBFSOURCE_H_
 #define PFAEDLE_OSM_SOURCE_PBFSOURCE_H_
 
+#include <queue>
 #include "pfaedle/osm/source/OsmSource.h"
 #include "util/geo/Geo.h"
 
@@ -21,6 +22,12 @@ class PBFSource : public OsmSource {
     I = 5,
   };
 
+  struct Node {
+    double lat, lon;
+    uint64_t id;
+    std::vector<OsmSourceAttr> tags;
+  };
+
   struct OSMHeader {
     util::geo::Box<double> bbox;
     std::vector<std::string> requiredFeatures;
@@ -30,11 +37,17 @@ class PBFSource : public OsmSource {
 
   struct PrimitiveBlock {
     std::vector<std::string> stringTable;
-    std::vector<unsigned char*> primitiveGroups;
+    std::queue<unsigned char*> primitiveGroups;
     uint32_t granularity = 100;
     uint64_t latOffset = 0;
     uint64_t lonOffset = 0;
     uint32_t dateGranularity = 1000;
+
+    unsigned char* c = 0;
+    size_t curGroupLen = 0;
+
+    std::vector<Node> curDenseNodes;
+    size_t denseNodePtr = 0;
   };
 
   struct BlobHeader {
@@ -56,7 +69,7 @@ class PBFSource : public OsmSource {
   virtual uint64_t nextMemberNode();
   virtual const OsmSourceRelationMember* nextMember();
   virtual const OsmSourceRelation* nextRel();
-  virtual void cont();
+  virtual bool cont() {};
 
   virtual void seekNodes();
   virtual void seekWays();
@@ -77,7 +90,9 @@ class PBFSource : public OsmSource {
 
   uint8_t _which = 0;
 
-  void getNextBlock();
+  PrimitiveBlock _curBlock;
+
+  bool getNextBlock();
   OSMHeader parseOSMHeader(const Blob& blob);
   PrimitiveBlock parseOSMData(const Blob& blob);
   BlobHeader parseBlobHeader(size_t len);
@@ -98,7 +113,12 @@ class PBFSource : public OsmSource {
   uint64_t parseUInt(std::pair<VarType, uint8_t> typeId);
   void skipType(VarType type, unsigned char *& c);
   void skipType(VarType type);
+  virtual bool checkGroup();
   util::geo::Box<double> parseHeaderBBox(unsigned char*& c);
+
+  std::vector<Node> parseDenseNodes(unsigned char*& c);
+
+  OsmSourceNode _curNode;
 };
 
 }  // namespace source
