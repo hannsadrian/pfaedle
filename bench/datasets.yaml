@@ -1,0 +1,9 @@
+# Benchmark datasets (URLs optional; placeholders to be filled by users)
+# Do not commit data. These are references only.
+
+freiburg_small:
+  osm_url: "https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf"
+  osm_checksum: ""
+  gtfs_url: ""
+  gtfs_checksum: ""
+  notes: "Small CI smoke dataset. Set local paths via env overrides."

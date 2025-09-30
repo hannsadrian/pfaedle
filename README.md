@@ -50,6 +50,23 @@ $ pfaedle -x <OSM FILE> <GTFS INPUT FEED>
 
 A shape'd version of the input GTFS feed will be written to `./gtfs-out`.
 
+## Benchmark and metrics (experimental)
+
+For reproducible performance checks, pfaedle can emit a minimal JSON metrics report and provides a tiny harness under `bench/`.
+
+- Emit metrics during a run by adding `--metrics-out path/to/report.json`.
+- Use the helper script to run a smoke benchmark:
+
+```
+# If you have local data under datasets/freiburg/ provided in this repo:
+bench/run_bench.sh --dataset freiburg_small --out report.json
+
+# Or provide explicit paths:
+bench/run_bench.sh --osm path/to/data.osm.bz2 --gtfs path/to/feed.zip --out report.json
+```
+
+This writes `report.json` with ingestion, matching and memory fields that can be compared using `bench/compare_reports.py`.
+
 By default, shapes are only calculated for trips that don't have a shape in the
 input feed. To drop all existing shapes, use the `-D` flag.
 

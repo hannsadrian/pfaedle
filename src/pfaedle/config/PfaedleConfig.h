@@ -23,6 +23,7 @@ struct Config {
       : dbgOutputPath("."),
         solveMethod("global"),
         outputPath("gtfs-out"),
+        metricsOut(""),
         dropShapes(false),
         useHMM(false),
         writeGraph(false),
@@ -46,6 +47,8 @@ struct Config {
   std::string solveMethod;
   std::string shapeTripId;
   std::string outputPath;
+  // If set, write a JSON metrics report to this path at the end of the run
+  std::string metricsOut;
   std::string writeOsm;
   std::string osmPath;
   std::string motCfgParam;
@@ -76,6 +79,7 @@ struct Config {
     std::stringstream ss;
     ss << "trip-id: " << shapeTripId << "\n"
        << "output-path: " << outputPath << "\n"
+     << "metrics-out: " << metricsOut << "\n"
        << "write-osm-path: " << writeOsm << "\n"
        << "read-osm-path: " << osmPath << "\n"
        << "debug-output-path: " << dbgOutputPath << "\n"

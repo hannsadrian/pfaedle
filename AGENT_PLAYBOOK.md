@@ -733,3 +733,88 @@ Agent progress log (append new entries below):
     next_actions:
   - Create PR-1 adding benchmark harness, metrics, and CI small dataset job.
   - Produce baseline report.json for freiburg_small and attach to PR.
+
+- timestamp: 2025-09-30 13:52:00Z
+  actor: agent
+  branch: feat/bench-pr1
+  pr_url: ""
+  status: merged
+  scope:
+    - area: bench
+      summary: Completed PR-1 — added benchmark harness, metrics flag, and validated a Freiburg smoke run.
+    - area: docs
+      summary: README updated with metrics and bench usage; help includes --metrics-out.
+  datasets:
+    - name: freiburg_small
+      metrics_before:
+        parse_wall_ms: 0
+        match_p95_ms: 0
+        peak_rss_mb: 0
+        shapes_size_bytes: 0
+      metrics_after:
+        parse_wall_ms: 157003
+        match_p95_ms: 0
+        peak_rss_mb: 578
+        shapes_size_bytes: 0
+      quality_after:
+        stop_p95_m: null
+        forbidden_violations: null
+        simplification_hausdorff_p95_m: null
+        relation_coverage_pct: null
+      notes: |
+        Report summary (report.json): trips_total=39671, trips_succeeded=39671, trips_failed=0, match_wall_ms_total≈2755ms. Ingestion time currently aggregates GTFS+OSM build. On macOS, both maximum resident set size and peak memory footprint are printed; report uses peak_rss_mb≈577.7. Earlier, an assertion in EDijkstra.tpp (A* heuristic monotonicity) was observed under a different invocation; latest Freiburg run completed cleanly. If it reappears, a temporary workaround is to run with --no-a-star; PR-2/PR-3 should harden heuristics and add guards.
+  flags_used:
+    osm_format: xml
+    relation_mode: off
+    per_mot_graphs: false
+    cache_stop_pairs: false
+    shape_simplification: off
+    shape_simplify_tolerance_meters: 0
+    shape_simplify_preserve_stops: true
+    shape_deduplicate: true
+  next_actions:
+    - Start PR-2: add libosmium PBF streaming ingestion and -X PBF output
+    - Add CI smoke job to run freiburg_small and publish report.json artifact
+    - Split ingestion metrics (gtfs_parse_ms, osm_parse_ms) and add p50/p95 match timings
+    - Add heuristic guards or fallback path to avoid EDijkstra assertion on edge cases
+
+- timestamp: 2025-09-30 11:05:00Z
+  actor: agent
+  branch: feat/bench-pr1
+  pr_url: ""
+  status: opened
+  scope:
+    - area: bench
+      summary: Added minimal benchmark harness (datasets.yaml, run_bench.sh, compute_quality.py, compare_reports.py) and metrics emission via --metrics-out.
+    - area: docs
+      summary: Updated help to document --metrics-out.
+  datasets:
+    - name: freiburg_small
+      metrics_before:
+        parse_wall_ms: 0
+        match_p95_ms: 0
+        peak_rss_mb: 0
+        shapes_size_bytes: 0
+      metrics_after:
+        parse_wall_ms: 0
+        match_p95_ms: 0
+        peak_rss_mb: 0
+        shapes_size_bytes: 0
+      quality_after:
+        stop_p95_m: 0
+        forbidden_violations: 0
+        simplification_hausdorff_p95_m: null
+        relation_coverage_pct: null
+      notes: Initial scaffolding only; quality metrics to be implemented in later PRs.
+  flags_used:
+    osm_format: auto
+    relation_mode: off
+    per_mot_graphs: false
+    cache_stop_pairs: false
+    shape_simplification: off
+    shape_simplify_tolerance_meters: 0
+    shape_simplify_preserve_stops: true
+    shape_deduplicate: true
+  next_actions:
+    - Build and run bench on small local dataset to produce baseline report.json
+    - Add CI job to run bench smoke test

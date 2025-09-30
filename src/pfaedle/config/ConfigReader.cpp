@@ -75,6 +75,8 @@ void ConfigReader::help(const char* bin) {
             << "\nOutput:\n"
             << std::setw(35) << "  -o [ --output ] arg (=gtfs-out)"
             << "GTFS output path\n"
+            << std::setw(35) << "  --metrics-out arg"
+            << "write JSON metrics report to given file path\n"
             << std::setw(35) << "  -X [ --osm-out ] arg"
             << "if specified, a filtered OSM file will be\n"
             << std::setw(35) << " "
@@ -137,6 +139,7 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
                          {"overpass", no_argument, 0, 'a'},
                          {"osmfilter", no_argument, 0, 'f'},
                          {"osm-out", required_argument, 0, 'X'},
+                         {"metrics-out", required_argument, 0, 101},
                          {"trip-id", required_argument, 0, 'T'},
                          {"write-graph", no_argument, 0, 1},
                          {"write-trgraph", no_argument, 0, 4},
@@ -159,6 +162,9 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
   while ((c = getopt_long(argc, argv, ":o:hvi:c:x:Dm:g:X:T:d:pP:FWb:", ops, 0)) !=
          -1) {
     switch (c) {
+      case 101:
+        cfg->metricsOut = optarg;
+        break;
       case 1:
         cfg->writeGraph = true;
         break;

@@ -1,0 +1,25 @@
+{
+  "build": {
+    "git_sha": "v0.1.6-193-g0b6b481-dirty",
+    "pfaedle_version": "v0.1.6-193-g0b6b481-dirty"
+  },
+  "config": {
+    "cache_stop_pairs": false,
+    "per_mot_graphs": false,
+    "relation_mode": "off",
+    "shape_simplification": "off"
+  },
+  "ingestion": {
+    "parse_wall_ms": 157002.658000
+  },
+  "matching": {
+    "match_wall_ms_total": 2755.023000,
+    "trips_failed": 0,
+    "trips_succeeded": 39671,
+    "trips_total": 39671
+  },
+  "memory": {
+    "peak_rss_mb": 577.656250
+  },
+  "version": 1
+}

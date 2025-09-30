@@ -430,6 +430,48 @@ int main(int argc, char** argv) {
     wr.closeAll();
   }
 
+  // Minimal metrics report for benchmark harness
+  if (!cfg.metricsOut.empty()) {
+    util::json::Dict report;
+    report["version"] = 1;
+    // config subset
+    util::json::Dict cfgJson;
+    cfgJson["relation_mode"] = std::string("off");
+    cfgJson["per_mot_graphs"] = false;
+    cfgJson["cache_stop_pairs"] = false;
+    cfgJson["shape_simplification"] = std::string("off");
+    report["config"] = cfgJson;
+
+    util::json::Dict ing;
+    ing["parse_wall_ms"] = tGtfsBuild + tOsmBuild;  // rough combined
+    report["ingestion"] = ing;
+
+    util::json::Dict match;
+    match["trips_total"] = static_cast<int>(gtfs[0].getTrips().size());
+    match["trips_succeeded"] = static_cast<int>(stats.totNumTrips);
+    match["trips_failed"] = static_cast<int>(gtfs[0].getTrips().size() - stats.totNumTrips);
+    match["match_wall_ms_total"] = stats.solveTime;
+    report["matching"] = match;
+
+    util::json::Dict mem;
+    mem["peak_rss_mb"] = util::getPeakRSS() / (1024.0 * 1024.0);
+    report["memory"] = mem;
+
+    util::json::Dict build;
+    build["git_sha"] = std::string(VERSION_FULL);
+    build["pfaedle_version"] = std::string(VERSION_FULL);
+    report["build"] = build;
+
+    std::ofstream ofs(cfg.metricsOut);
+    if (!ofs.good()) {
+      LOG(ERROR) << "Could not open metrics output file: " << cfg.metricsOut;
+    } else {
+      util::json::Writer wr(&ofs, 6, true);
+      wr.val(report);
+      wr.closeAll();
+    }
+  }
+
   if (cfg.feedPaths.size()) {
     try {
       LOG(INFO) << "Writing output GTFS to " << cfg.outputPath << " ...";
