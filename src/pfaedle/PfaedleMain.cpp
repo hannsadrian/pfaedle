@@ -34,6 +34,7 @@
 #include "util/geo/output/GeoJsonOutput.h"
 #include "util/json/Writer.h"
 #include "util/log/Log.h"
+#include "pfaedle/osm/OsmPbfReader.h"
 
 #ifndef CFG_HOME_SUFFIX
 #define CFG_HOME_SUFFIX "/.config"
@@ -52,6 +53,7 @@ using pfaedle::config::MotConfig;
 using pfaedle::config::MotConfigReader;
 using pfaedle::osm::BBoxIdx;
 using pfaedle::osm::OsmBuilder;
+using pfaedle::osm::OsmPbfReader;
 using pfaedle::router::DistDiffTransWeight;
 using pfaedle::router::DistDiffTransWeightNoHeur;
 using pfaedle::router::ExpoTransWeight;
@@ -69,6 +71,7 @@ using pfaedle::statsimiclassifier::JaccardClassifier;
 using pfaedle::statsimiclassifier::JaccardGeodistClassifier;
 using pfaedle::statsimiclassifier::PEDClassifier;
 using pfaedle::statsimiclassifier::StatsimiClassifier;
+using pfaedle::osm::OsmPbfReader;
 
 enum class RetCode {
   SUCCESS = 0,
@@ -192,7 +195,7 @@ int main(int argc, char** argv) {
   }
 
   if (cfg.writeOsm.size()) {
-    LOG(INFO) << "Writing filtered XML to " << cfg.writeOsm << " ...";
+    LOG(INFO) << "Writing filtered OSM to " << cfg.writeOsm << " ...";
     BBoxIdx box(cfg.boxPadding);
 
     for (size_t i = 0; i < cfg.feedPaths.size(); i++) {
@@ -208,7 +211,65 @@ int main(int argc, char** argv) {
       }
     }
     try {
-      osmBuilder.filterWrite(cfg.osmPath, cfg.writeOsm, opts, box);
+      // We always generate an XML filtered file first (as before)
+      // then optionally convert to PBF if requested.
+      std::string filterTarget = cfg.writeOsm;
+      bool wantPbf = (cfg.filterOutputFormat == "pbf");
+      std::string xmlTmp = cfg.writeOsm;
+      if (wantPbf) {
+        // ensure .pbf extension on final path, and write XML to temp path
+        if (filterTarget.size() >= 4 &&
+            filterTarget.substr(filterTarget.size() - 4) == ".pbf") {
+          xmlTmp = filterTarget.substr(0, filterTarget.size() - 4) + ".osm";
+        } else {
+          // if no .pbf, keep original as final PBF path and temp xml next to it
+          filterTarget += ".pbf";
+          xmlTmp = cfg.writeOsm;
+          if (xmlTmp.size() < 4 || xmlTmp.substr(xmlTmp.size() - 4) != ".osm")
+            xmlTmp += ".osm";
+        }
+      }
+
+      // If input is PBF, convert it to a temporary XML first (filterWrite expects XML)
+      std::string inputXml = cfg.osmPath;
+      bool inputWasPbf = false;
+      if (cfg.osmPath.size() >= 4 && cfg.osmPath.substr(cfg.osmPath.size() - 4) == ".pbf") {
+#ifdef OSMIUM_ENABLED
+        inputWasPbf = true;
+        // Strip trailing .pbf and any preceding .osm extension to avoid .osm.osm
+        inputXml = cfg.osmPath.substr(0, cfg.osmPath.size() - 4);
+        if (inputXml.size() >= 4 && inputXml.substr(inputXml.size() - 4) == ".osm") {
+          // leave as-is
+        } else {
+          inputXml += ".osm";
+        }
+        LOG(INFO) << "Converting PBF input to temporary XML: " << inputXml << " ...";
+        OsmPbfReader::convertToXml(cfg.osmPath, inputXml);
+#else
+        LOG(ERROR) << "-X requested with PBF input, but libosmium was not found at build time.";
+        exit(static_cast<int>(RetCode::OSM_PARSE_ERR));
+#endif
+      }
+
+      osmBuilder.filterWrite(inputXml, xmlTmp, opts, box);
+
+      if (wantPbf) {
+#ifdef OSMIUM_ENABLED
+        try {
+          OsmPbfReader::convertToPbf(xmlTmp, filterTarget);
+          if (filterTarget != cfg.writeOsm) {
+            LOG(INFO) << "Filtered PBF written to " << filterTarget;
+          }
+        } catch (const std::exception& ex) {
+          LOG(WARN) << "PBF conversion failed (" << ex.what()
+                    << "), leaving XML at " << xmlTmp;
+        }
+#else
+        LOG(WARN) << "PBF conversion requested but libosmium was not found at build time. "
+                     "Leaving XML at "
+                  << xmlTmp;
+#endif
+      }
     } catch (const pfxml::parse_exc& ex) {
       LOG(ERROR) << "Could not parse OSM data, reason was:";
       std::cerr << ex.what() << std::endl;
@@ -280,9 +341,32 @@ int main(int argc, char** argv) {
 
       T_START(osmBuild);
 
-      if (fStops.size())
-        osmBuilder.read(cfg.osmPath, motCfg.osmBuildOpts, &graph, box,
-                        cfg.gridSize, &restr);
+      if (fStops.size()) {
+        // Determine which reader to use
+        std::string fmt = cfg.osmFormat;
+        if (fmt == "auto") {
+          // naive by extension
+          if (cfg.osmPath.size() >= 4 &&
+              cfg.osmPath.substr(cfg.osmPath.size() - 4) == ".pbf")
+            fmt = "pbf";
+          else
+            fmt = "xml";
+        }
+  if (fmt == "pbf") {
+#ifdef OSMIUM_ENABLED
+    OsmPbfReader pbf;
+    pbf.read(cfg.osmPath, motCfg.osmBuildOpts, &graph, box, cfg.gridSize,
+       &restr);
+#else
+    LOG(ERROR) << "PBF input requested but libosmium was not found at build time. "
+      "Please rebuild with libosmium/protozero or use --osm-format xml.";
+    exit(static_cast<int>(RetCode::OSM_PARSE_ERR));
+#endif
+  } else {
+          osmBuilder.read(cfg.osmPath, motCfg.osmBuildOpts, &graph, box,
+                          cfg.gridSize, &restr);
+        }
+      }
 
       tOsmBuild += T_STOP(osmBuild);
       graphDimensions[filePost].first = graph.getNds().size();

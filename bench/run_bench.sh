@@ -73,10 +73,9 @@ if [[ -z "$OSM" || -z "$GTFS" ]]; then
   exit 2
 fi
 
-# Temporary: PBF support lands in PR-2. For PR-1, prefer .osm[.bz2]
+# Info: PBF input is supported. If autodetection misfires, force with --osm-format pbf|xml
 if [[ "$OSM" == *.pbf ]]; then
-  echo "NOTE: .pbf input is planned (PR-2). Current build expects .osm[.bz2]." >&2
-  echo "If this run fails on .pbf, convert with osmium: osmium cat input.osm.pbf -o output.osm.bz2" >&2
+  echo "Using .pbf input. You can force format via --osm-format=pbf if needed (auto by default)." >&2
 fi
 
 BIN="$(pwd)/build/pfaedle"

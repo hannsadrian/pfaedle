@@ -28,4 +28,9 @@ if (BZIP2_FOUND)
 	target_link_libraries(pfaedle ${BZIP2_LIBRARY})
 endif( BZIP2_FOUND )
 
+# Link Expat if libosmium/protozero were found (needed by any_input XML support)
+if (LIBOSMIUM_INCLUDE_DIR AND PROTOZERO_INCLUDE_DIR AND EXPAT_FOUND)
+	target_link_libraries(pfaedle ${EXPAT_LIBRARIES})
+endif()
+
 add_subdirectory(tests)

@@ -56,7 +56,9 @@ void ConfigReader::help(const char* bin) {
             << std::setw(35) << " "
             << "  parameter (see usage)\n"
             << std::setw(35) << "  -x [ --osm-file ] arg"
-            << "OSM xml input file\n"
+            << "OSM input file (.osm[.bz2|.gz]|.pbf)\n"
+            << std::setw(35) << "     --osm-format arg (=auto)"
+            << "force osm reader: auto|xml|pbf\n"
             << std::setw(35) << "  -m [ --mots ] arg (=all)"
             << "MOTs to calculate shapes for, comma sep.,\n"
             << std::setw(35) << " "
@@ -81,6 +83,8 @@ void ConfigReader::help(const char* bin) {
             << "if specified, a filtered OSM file will be\n"
             << std::setw(35) << " "
             << "  written to <arg>\n"
+            << std::setw(35) << "     --filter-output-format arg (=pbf)"
+            << "format for -X output: xml|pbf\n"
             << std::setw(35) << "  --inplace"
             << "overwrite input GTFS feed with output feed\n"
             << "\nDebug Output:\n"
@@ -128,10 +132,14 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
   std::string motStr = "all";
   bool printOpts = false;
 
+  // Use distinct values > 255 for long-only options to avoid collisions
+  enum { OPT_METRICS_OUT = 101, OPT_OSM_FORMAT = 1001, OPT_FILTER_OUT_FMT = 1002 };
+
   struct option ops[] = {{"output", required_argument, 0, 'o'},
                          {"input", required_argument, 0, 'i'},
                          {"config", required_argument, 0, 'c'},
                          {"osm-file", required_argument, 0, 'x'},
+                         {"osm-format", required_argument, 0, OPT_OSM_FORMAT},
                          {"drop-shapes", required_argument, 0, 'D'},
                          {"mots", required_argument, NULL, 'm'},
                          {"grid-size", required_argument, 0, 'g'},
@@ -139,7 +147,8 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
                          {"overpass", no_argument, 0, 'a'},
                          {"osmfilter", no_argument, 0, 'f'},
                          {"osm-out", required_argument, 0, 'X'},
-                         {"metrics-out", required_argument, 0, 101},
+                         {"filter-output-format", required_argument, 0, OPT_FILTER_OUT_FMT},
+                         {"metrics-out", required_argument, 0, OPT_METRICS_OUT},
                          {"trip-id", required_argument, 0, 'T'},
                          {"write-graph", no_argument, 0, 1},
                          {"write-trgraph", no_argument, 0, 4},
@@ -162,8 +171,14 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
   while ((c = getopt_long(argc, argv, ":o:hvi:c:x:Dm:g:X:T:d:pP:FWb:", ops, 0)) !=
          -1) {
     switch (c) {
-      case 101:
+      case OPT_METRICS_OUT:
         cfg->metricsOut = optarg;
+        break;
+      case OPT_OSM_FORMAT:
+        cfg->osmFormat = optarg;
+        break;
+      case OPT_FILTER_OUT_FMT:
+        cfg->filterOutputFormat = optarg;
         break;
       case 1:
         cfg->writeGraph = true;
@@ -269,6 +284,10 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
   }
 
   for (int i = optind; i < argc; i++) cfg->feedPaths.push_back(argv[i]);
+
+  // Defaults if not set
+  if (cfg->osmFormat.empty()) cfg->osmFormat = "auto";
+  if (cfg->filterOutputFormat.empty()) cfg->filterOutputFormat = "pbf";
 
   auto v = util::split(motStr, ',');
   for (const auto& motStr : v) {

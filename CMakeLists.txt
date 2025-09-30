@@ -1,5 +1,7 @@
 cmake_minimum_required (VERSION 3.6)
-set(CMAKE_CXX_STANDARD 11)
+# libosmium requires modern C++; use C++17 to satisfy dependencies
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project (pfaedle)
 
@@ -28,9 +30,33 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPFAEDLE_PRECISION=${PFAEDLE_PRECISION}")
 
+# Option to silence all warnings (useful for clean error-only logs in CI/debug)
+option(PFAEDLE_SILENCE_WARNINGS "Silence compiler warnings (-w)" OFF)
+if (PFAEDLE_SILENCE_WARNINGS)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
+endif()
+
 find_package(LibZip)
 find_package(ZLIB)
 find_package(BZip2)
+
+# Try to locate libosmium and protozero (header-only)
+find_path(LIBOSMIUM_INCLUDE_DIR NAMES osmium/osm.hpp PATH_SUFFIXES include)
+find_path(PROTOZERO_INCLUDE_DIR NAMES protozero/pbf_reader.hpp PATH_SUFFIXES include)
+
+if (LIBOSMIUM_INCLUDE_DIR AND PROTOZERO_INCLUDE_DIR)
+	message(STATUS "Found libosmium at ${LIBOSMIUM_INCLUDE_DIR} and protozero at ${PROTOZERO_INCLUDE_DIR}")
+	include_directories(${LIBOSMIUM_INCLUDE_DIR} ${PROTOZERO_INCLUDE_DIR})
+	add_definitions(-DOSMIUM_ENABLED=1)
+	# libosmium's XML reader uses Expat; required because we include any_input and convert XML->PBF
+	find_package(EXPAT REQUIRED)
+	if (EXPAT_FOUND)
+		message(STATUS "Found Expat: ${EXPAT_LIBRARIES}")
+		include_directories(${EXPAT_INCLUDE_DIRS})
+	endif()
+else()
+	message(STATUS "libosmium/protozero not found; PBF support will be disabled")
+endif()
 
 if (LIBZIP_FOUND)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLIBZIP_FOUND=1")

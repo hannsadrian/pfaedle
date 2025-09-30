@@ -718,6 +718,7 @@ Agent progress log (append new entries below):
   pr_url: ""
   status: initialized
   scope:
+
   - area: docs
     summary: Seeded AGENT_PLAYBOOK.md with performance, memory, relations, simplification, and benchmarking plan.
     datasets: []
@@ -740,30 +741,31 @@ Agent progress log (append new entries below):
   pr_url: ""
   status: merged
   scope:
-    - area: bench
-      summary: Completed PR-1 — added benchmark harness, metrics flag, and validated a Freiburg smoke run.
-    - area: docs
-      summary: README updated with metrics and bench usage; help includes --metrics-out.
-  datasets:
-    - name: freiburg_small
-      metrics_before:
-        parse_wall_ms: 0
-        match_p95_ms: 0
-        peak_rss_mb: 0
-        shapes_size_bytes: 0
-      metrics_after:
-        parse_wall_ms: 157003
-        match_p95_ms: 0
-        peak_rss_mb: 578
-        shapes_size_bytes: 0
-      quality_after:
-        stop_p95_m: null
-        forbidden_violations: null
-        simplification_hausdorff_p95_m: null
-        relation_coverage_pct: null
-      notes: |
-        Report summary (report.json): trips_total=39671, trips_succeeded=39671, trips_failed=0, match_wall_ms_total≈2755ms. Ingestion time currently aggregates GTFS+OSM build. On macOS, both maximum resident set size and peak memory footprint are printed; report uses peak_rss_mb≈577.7. Earlier, an assertion in EDijkstra.tpp (A* heuristic monotonicity) was observed under a different invocation; latest Freiburg run completed cleanly. If it reappears, a temporary workaround is to run with --no-a-star; PR-2/PR-3 should harden heuristics and add guards.
-  flags_used:
+
+  - area: bench
+    summary: Completed PR-1 — added benchmark harness, metrics flag, and validated a Freiburg smoke run.
+  - area: docs
+    summary: README updated with metrics and bench usage; help includes --metrics-out.
+    datasets:
+  - name: freiburg_small
+    metrics_before:
+    parse_wall_ms: 0
+    match_p95_ms: 0
+    peak_rss_mb: 0
+    shapes_size_bytes: 0
+    metrics_after:
+    parse_wall_ms: 157003
+    match_p95_ms: 0
+    peak_rss_mb: 578
+    shapes_size_bytes: 0
+    quality_after:
+    stop_p95_m: null
+    forbidden_violations: null
+    simplification_hausdorff_p95_m: null
+    relation_coverage_pct: null
+    notes: |
+    Report summary (report.json): trips_total=39671, trips_succeeded=39671, trips_failed=0, match_wall_ms_total≈2755ms. Ingestion time currently aggregates GTFS+OSM build. On macOS, both maximum resident set size and peak memory footprint are printed; report uses peak_rss_mb≈577.7. Earlier, an assertion in EDijkstra.tpp (A\* heuristic monotonicity) was observed under a different invocation; latest Freiburg run completed cleanly. If it reappears, a temporary workaround is to run with --no-a-star; PR-2/PR-3 should harden heuristics and add guards.
+    flags_used:
     osm_format: xml
     relation_mode: off
     per_mot_graphs: false
@@ -772,28 +774,28 @@ Agent progress log (append new entries below):
     shape_simplify_tolerance_meters: 0
     shape_simplify_preserve_stops: true
     shape_deduplicate: true
-  next_actions:
-    - Start PR-2: add libosmium PBF streaming ingestion and -X PBF output
-    - Add CI smoke job to run freiburg_small and publish report.json artifact
-    - Split ingestion metrics (gtfs_parse_ms, osm_parse_ms) and add p50/p95 match timings
-    - Add heuristic guards or fallback path to avoid EDijkstra assertion on edge cases
+    next_actions:
+  - Start PR-2: add libosmium PBF streaming ingestion and -X PBF output
+  - Add CI smoke job to run freiburg_small and publish report.json artifact
+  - Split ingestion metrics (gtfs_parse_ms, osm_parse_ms) and add p50/p95 match timings
+  - Add heuristic guards or fallback path to avoid EDijkstra assertion on edge cases
 
-- timestamp: 2025-09-30 11:05:00Z
+- timestamp: 2025-09-30 14:30:00Z
   actor: agent
-  branch: feat/bench-pr1
+  branch: feat/pbf-pr2
   pr_url: ""
   status: opened
   scope:
-    - area: bench
-      summary: Added minimal benchmark harness (datasets.yaml, run_bench.sh, compute_quality.py, compare_reports.py) and metrics emission via --metrics-out.
+    - area: ingestion
+      summary: Added PBF scaffolding (flags, CMake detection, OsmPbfReader stub) and wiring with graceful fallbacks.
     - area: docs
-      summary: Updated help to document --metrics-out.
+      summary: Help text now documents --osm-format and --filter-output-format; default -X emits PBF when available.
   datasets:
     - name: freiburg_small
       metrics_before:
-        parse_wall_ms: 0
+        parse_wall_ms: 157003
         match_p95_ms: 0
-        peak_rss_mb: 0
+        peak_rss_mb: 578
         shapes_size_bytes: 0
       metrics_after:
         parse_wall_ms: 0
@@ -801,11 +803,11 @@ Agent progress log (append new entries below):
         peak_rss_mb: 0
         shapes_size_bytes: 0
       quality_after:
-        stop_p95_m: 0
-        forbidden_violations: 0
+        stop_p95_m: null
+        forbidden_violations: null
         simplification_hausdorff_p95_m: null
         relation_coverage_pct: null
-      notes: Initial scaffolding only; quality metrics to be implemented in later PRs.
+      notes: Build succeeds without libosmium; PBF paths compile behind OSMIUM_ENABLED and log clear errors if requested without support.
   flags_used:
     osm_format: auto
     relation_mode: off
@@ -816,5 +818,136 @@ Agent progress log (append new entries below):
     shape_simplify_preserve_stops: true
     shape_deduplicate: true
   next_actions:
-    - Build and run bench on small local dataset to produce baseline report.json
-    - Add CI job to run bench smoke test
+    - Implement full libosmium-based PBF streaming reader parity with XML path
+    - Add .pbf conversion in bench harness and parity tests XML vs PBF on small dataset
+
+- timestamp: 2025-09-30 11:05:00Z
+  actor: agent
+  branch: feat/bench-pr1
+  pr_url: ""
+  status: opened
+  scope:
+  - area: bench
+    summary: Added minimal benchmark harness (datasets.yaml, run_bench.sh, compute_quality.py, compare_reports.py) and metrics emission via --metrics-out.
+  - area: docs
+    summary: Updated help to document --metrics-out.
+    datasets:
+  - name: freiburg_small
+    metrics_before:
+    parse_wall_ms: 0
+    match_p95_ms: 0
+    peak_rss_mb: 0
+    shapes_size_bytes: 0
+    metrics_after:
+    parse_wall_ms: 0
+    match_p95_ms: 0
+    peak_rss_mb: 0
+    shapes_size_bytes: 0
+    quality_after:
+    stop_p95_m: 0
+    forbidden_violations: 0
+    simplification_hausdorff_p95_m: null
+    relation_coverage_pct: null
+    notes: Initial scaffolding only; quality metrics to be implemented in later PRs.
+    flags_used:
+    osm_format: auto
+    relation_mode: off
+    per_mot_graphs: false
+    cache_stop_pairs: false
+    shape_simplification: off
+    shape_simplify_tolerance_meters: 0
+    shape_simplify_preserve_stops: true
+    shape_deduplicate: true
+    next_actions:
+  - Build and run bench on small local dataset to produce baseline report.json
+  - Add CI job to run bench smoke test
+
+- timestamp: 2025-09-30 14:35:00Z
+  actor: agent
+  branch: feat/pbf-pr2
+  pr_url: ""
+  status: opened
+  scope:
+    - area: ingestion
+      summary: Added CLI flags --osm-format and --filter-output-format; scaffolded PBF reader using libosmium with fallback; wired format selection in main; optional filtered PBF output for -X.
+    - area: docs
+      summary: Help text updated to mention PBF input and filter output formats.
+  datasets:
+    - name: freiburg_small
+      metrics_before:
+        parse_wall_ms: 157003
+        match_p95_ms: 0
+        peak_rss_mb: 578
+        shapes_size_bytes: 0
+      metrics_after:
+        parse_wall_ms: 0
+        match_p95_ms: 0
+        peak_rss_mb: 0
+        shapes_size_bytes: 0
+      quality_after:
+        stop_p95_m: null
+        forbidden_violations: null
+        simplification_hausdorff_p95_m: null
+        relation_coverage_pct: null
+      notes: Initial scaffolding does not change default behavior; PBF reader logs a placeholder message until streaming ingestion is fully implemented. Filtered PBF conversion uses libosmium when available.
+  flags_used:
+    osm_format: auto
+    relation_mode: off
+    per_mot_graphs: false
+    cache_stop_pairs: false
+    shape_simplification: off
+    shape_simplify_tolerance_meters: 0
+    shape_simplify_preserve_stops: true
+    shape_deduplicate: true
+  next_actions:
+    - Implement full libosmium streaming read to build Graph (bbox nodes, relations, ways, edges) with early filtering
+    - Add equivalence tests comparing XML vs PBF ingestion on small dataset
+    - Update CI to install libosmium/protozero on Linux/macOS runners
+
+- timestamp: 2025-09-30 16:30:00Z
+  actor: agent
+  branch: feat/pbf-pr2
+  pr_url: ""
+  status: in-progress
+  scope:
+    - area: build
+      summary: Bumped C++ standard to C++17. Auto-detect libosmium/protozero headers; define OSMIUM_ENABLED. Linked Expat to satisfy libosmium XML parser symbols. Added PFAEDLE_SILENCE_WARNINGS flag.
+    - area: ingestion
+      summary: Implemented native PBF streaming reader (OsmPbfReader::read) using libosmium. Multi-pass: nodes (bbox, node flags), relations (keep/drop, restrictions), ways pre-scan (collect needed nodes), nodes+ways (NodeLocationsForWays) with only-index-needed-nodes optimization. Preserved XML post-processing sequence to maintain behavior.
+    - area: tooling/docs
+      summary: Updated bench/run_bench.sh to acknowledge PBF support and mention --osm-format. Added convertToPbf and convertToXml utilities using libosmium any_input.
+    - area: filter (-X)
+      summary: For PBF input, -X now converts input to temp XML, runs existing XML-only filterWrite, and optionally converts filtered XML to PBF. Fixed temp filename derivation and registered xml_output so libosmium can write XML.
+  datasets:
+    - name: freiburg_small
+      metrics_before:
+        parse_wall_ms: 157003
+        peak_rss_mb: 578
+      metrics_after_pbf_input:
+        parse_wall_ms: ~12487–13292
+        peak_rss_mb: ~824–848
+      metrics_after_filtered_pbf_as_input:
+        parse_wall_ms: ~3027
+        peak_rss_mb: ~535
+      notes: PBF streaming ingestion achieves ~12–13s parse time vs 157s baseline (≈12× faster). Initial RSS rose to ~1.26GB due to full node indexing; reduced to ~0.82–0.85GB with only-index-needed-nodes and earlier frees. Using the filtered PBF as input yields ~3s ingestion and ~-43MB vs baseline RSS. Matching time differences (~+0.07–0.45s) are within noise.
+  flags_used:
+    osm_format: auto
+    filter_output_format: pbf
+    relation_mode: off
+    per_mot_graphs: false
+    cache_stop_pairs: false
+    shape_simplification: off
+  fixes_and_learnings:
+    - getopt long-option collisions fixed by unique enum codes.
+    - libosmium requires modern C++; moved to C++17.
+    - Expat must be linked for libosmium XML reader paths (symbols XML_*).
+    - osmium::io::Writer must be passed by reference to osmium::apply; close writer explicitly.
+    - mmap index backends (Sparse/Dense) may be unavailable on Homebrew; fallback to FlexMem for portability.
+    - Avoid double .osm extension when converting from .osm.pbf.
+  known_gaps:
+    - -X filter still routes through XML intermediate; streaming PBF filter writer would remove both conversions.
+    - Ingestion metrics currently aggregate GTFS+OSM; consider splitting parse_wall_ms into gtfs_parse_ms and osm_parse_ms.
+  next_actions:
+    - Implement native streaming filter writer (PBF→PBF) mirroring OsmBuilder::filterWrite semantics; eliminate temp XML and conversions.
+    - Add pass-level timing logs (nodes, rels, ways scan, nodes+ways) for future tuning.
+    - Optional: CMake switch to force index backend when available (auto|flex|dense|sparse); keep FlexMem default.

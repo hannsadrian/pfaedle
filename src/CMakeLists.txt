@@ -17,6 +17,11 @@ if (BZIP2_FOUND)
 	include_directories( SYSTEM ${BZIP2_INCLUDE_DIR} )
 endif( BZIP2_FOUND )
 
+# Expat (used by libosmium XML parser) include path
+if (EXPAT_FOUND)
+	include_directories( SYSTEM ${EXPAT_INCLUDE_DIRS} )
+endif()
+
 add_subdirectory(util)
 add_subdirectory(pfaedle)
 add_subdirectory(cppgtfs)

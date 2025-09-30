@@ -30,6 +30,8 @@
 namespace pfaedle {
 namespace osm {
 
+class OsmPbfReader;  // forward declaration
+
 using ad::cppgtfs::gtfs::Stop;
 using pfaedle::router::NodeSet;
 using pfaedle::trgraph::Component;
@@ -105,6 +107,7 @@ class OsmBuilder {
                    const std::vector<OsmReadOpts>& opts, const BBoxIdx& box);
 
  private:
+  friend class OsmPbfReader;
   pfxml::parser_state readBBoxNds(pfxml::file* xml, OsmIdSet* nodes,
                                   OsmIdSet* noHupNodes, const OsmFilter& filter,
                                   const BBoxIdx& bbox) const;

@@ -1,8 +1,8 @@
 [![Left: station-to-station path of a single train through Switzerland obtained from schedule timetable data. Right: path of the same train map-matched by pfaedle.](geo/schweiz_ex_res.png?raw=true)](geo/schweiz_ex.png?raw=true)  
-*Left: station-to-station path of a single train through Switzerland obtained from official schedule data. Right: path of the same train map-matched by pfaedle.*
+_Left: station-to-station path of a single train through Switzerland obtained from official schedule data. Right: path of the same train map-matched by pfaedle._
 
 [![Left: station-to-station path of a single bus through Stuttgart obtained from official schedule data. Right: path of the same bus map-matched by pfaedle.](geo/stuttgart_ex_res.png?raw=true)](geo/stuttgart_ex.png?raw=true)  
-*Left: station-to-station path of a single bus through Stuttgart obtained from official schedule data. Right: path of the same bus map-matched by pfaedle.*
+_Left: station-to-station path of a single bus through Stuttgart obtained from official schedule data. Right: path of the same bus map-matched by pfaedle._
 
 [![Build](https://github.com/ad-freiburg/pfaedle/actions/workflows/build.yml/badge.svg)](https://github.com/ad-freiburg/pfaedle/actions/workflows/build.yml)
 
@@ -15,11 +15,11 @@ For a quick visual inspection of the shape quality, see for example the schedule
 
 ## Requirements
 
- * `cmake`
- * `gcc >= 5.0` (or `clang >= 3.9`)
- * `libzip` (*optional*, for ZIP support)
- * `zlib` (*optional*, for gzip support)
- * `libbz2` (*optional*, for bzip2 support)
+- `cmake`
+- `gcc >= 5.0` (or `clang >= 3.9`)
+- `libzip` (_optional_, for ZIP support)
+- `zlib` (_optional_, for gzip support)
+- `libbz2` (_optional_, for bzip2 support)
 
 ## Building and Installation
 
@@ -36,6 +36,7 @@ $ make -j
 ```
 
 To install, type
+
 ```shell
 $ make install
 ```
@@ -118,10 +119,10 @@ $ docker run -i --rm \
 
 The following flags may be useful for debugging:
 
- * `-T <GTFS TRIP ID>` only calculate shape for a single trip (specified via its GTFS trip id) and output it as GeoJSON to
-   `<dbg-path>/path.json`
- * `--write-graph` write the graph used for routing as GeoJSON to
- * `--write-trgraph` write the complete network graph to `<dbg-path>/trgraph.json`
+- `-T <GTFS TRIP ID>` only calculate shape for a single trip (specified via its GTFS trip id) and output it as GeoJSON to
+  `<dbg-path>/path.json`
+- `--write-graph` write the graph used for routing as GeoJSON to
+- `--write-trgraph` write the complete network graph to `<dbg-path>/trgraph.json`
 
 # Configuration
 

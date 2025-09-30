@@ -51,6 +51,10 @@ struct Config {
   std::string metricsOut;
   std::string writeOsm;
   std::string osmPath;
+  // Input format hint for OSM files: auto|xml|pbf (auto by extension)
+  std::string osmFormat;
+  // Output format for -X filtered OSM: xml|pbf (default pbf)
+  std::string filterOutputFormat;
   std::string motCfgParam;
   std::vector<std::string> feedPaths;
   std::vector<std::string> configPaths;
@@ -82,6 +86,8 @@ struct Config {
      << "metrics-out: " << metricsOut << "\n"
        << "write-osm-path: " << writeOsm << "\n"
        << "read-osm-path: " << osmPath << "\n"
+  << "osm-format: " << osmFormat << "\n"
+  << "filter-output-format: " << filterOutputFormat << "\n"
        << "debug-output-path: " << dbgOutputPath << "\n"
        << "drop-shapes: " << dropShapes << "\n"
        << "use-hmm: " << useHMM << "\n"
