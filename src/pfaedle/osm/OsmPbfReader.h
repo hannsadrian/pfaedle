@@ -31,6 +31,13 @@ class OsmPbfReader {
         // Useful for piping PBF input through the existing XML-only filterWrite path.
         static void convertToXml(const std::string& inPath,
                                                                                                          const std::string& outPath);
+
+                // Streaming filter: Read XML or PBF input and write a filtered PBF directly.
+                // Mirrors OsmBuilder::filterWrite semantics (keep/drop rules, bbox, relations trimmed to kept members).
+                static void filterToPbf(const std::string& inPath,
+                                                                const std::string& outPath,
+                                                                const std::vector<OsmReadOpts>& opts,
+                                                                const BBoxIdx& bbox);
 };
 
 }  // namespace osm

@@ -20,6 +20,8 @@
 #include <osmium/io/any_input.hpp>
 #include <osmium/io/pbf_output.hpp>
 #include <osmium/io/xml_output.hpp>
+#include <osmium/memory/buffer.hpp>
+#include <osmium/builder/osm_object_builder.hpp>
 #include <osmium/handler/node_locations_for_ways.hpp>
 #include <osmium/handler.hpp>
 #include <osmium/visitor.hpp>
@@ -168,10 +170,11 @@ void OsmPbfReader::read(const std::string& path, const pfaedle::osm::OsmReadOpts
         AttrMap wattrs;
         for (const auto& tag : w.tags()) wattrs[tag.key()] = tag.value();
         bool keep = false;
-        if (!wattrs.empty()) {
-          if (helper.relKeep(w.id(), way_rels, rels.flat)) keep = true;
-          else if (filter.keep(wattrs, OsmFilter::WAY) && !filter.drop(wattrs, OsmFilter::WAY)) keep = true;
-        }
+        // Evaluate relation-based keep regardless of tag availability
+        if (helper.relKeep(w.id(), way_rels, rels.flat)) keep = true;
+        else if (!wattrs.empty() && filter.keep(wattrs, OsmFilter::WAY) && !filter.drop(wattrs, OsmFilter::WAY)) keep = true;
+        // Must have at least two nodes to form an edge
+        if (w.nodes().size() <= 1) keep = false;
         if (!keep) continue;
         bool touches_bbox = false;
         for (const auto& nr : w.nodes()) {
@@ -245,14 +248,13 @@ void OsmPbfReader::read(const std::string& path, const pfaedle::osm::OsmReadOpts
 
             // Keep/drop decision similar to XML path
             bool keep = false;
-            if (!wattrs.empty()) {
-              if (helper.relKeep(w.id(), way_rels, rels.flat)) keep = true;
-              else if (filter.keep(wattrs, OsmFilter::WAY) && !filter.drop(wattrs, OsmFilter::WAY)) keep = true;
-            }
+            if (helper.relKeep(w.id(), way_rels, rels.flat)) keep = true;
+            else if (!wattrs.empty() && filter.keep(wattrs, OsmFilter::WAY) && !filter.drop(wattrs, OsmFilter::WAY)) keep = true;
+            if (w.nodes().size() <= 1) keep = false;
             if (!keep) break;
 
             // Check if any node is in bbox using precomputed bbox_nodes
-            bool touches_bbox = false;
+            bool touches_bbox = (bbox.size() == 0);
             for (const auto& nr : w.nodes()) {
               if (bbox_nodes.count(static_cast<pfaedle::osm::osmid>(nr.ref()))) { touches_bbox = true; break; }
             }
@@ -402,5 +404,313 @@ void OsmPbfReader::convertToXml(const std::string& inPath, const std::string& ou
   osmium::apply(reader, std::ref(writer));
   writer.close();
   reader.close();
+#endif
+}
+
+void OsmPbfReader::filterToPbf(const std::string& inPath,
+                               const std::string& outPath,
+                               const std::vector<pfaedle::osm::OsmReadOpts>& opts,
+                               const pfaedle::osm::BBoxIdx& bbox) {
+#ifndef OSMIUM_ENABLED
+  throw std::runtime_error("PBF filter not available: libosmium/protozero headers not found at build time");
+#else
+  using namespace pfaedle::osm;
+  // Merge filters and compute kept attribute keys to trim tag lists
+  AttrKeySet attrKeys[3] = {};
+  OsmFilter merged;
+  bool first = true;
+  for (const auto& o : opts) {
+    if (first) { merged = OsmFilter(o); first = false; }
+    else { merged = merged.merge(OsmFilter(o)); }
+    OsmBuilder().getKeptAttrKeys(o, attrKeys);
+  }
+
+  // Determine bbox: if empty, infer from input data like XML path does via <bounds>
+  pfaedle::osm::BBoxIdx effBox = bbox;
+  if (effBox.size() == 0) {
+    // Fallback: compute bounding box from all node locations in input
+    double minlat = 90, minlon = 180, maxlat = -90, maxlon = -180;
+    osmium::io::Reader rb(inPath, osmium::osm_entity_bits::node);
+    while (osmium::memory::Buffer buffer = rb.read()) {
+      for (auto& item : buffer) {
+        if (item.type() != osmium::item_type::node) continue;
+        const osmium::Node& n = static_cast<const osmium::Node&>(item);
+        if (!n.location()) continue;
+        double y = n.location().lat();
+        double x = n.location().lon();
+        if (y < minlat) minlat = y;
+        if (x < minlon) minlon = x;
+        if (y > maxlat) maxlat = y;
+        if (x > maxlon) maxlon = x;
+      }
+    }
+    rb.close();
+    if (minlat <= maxlat && minlon <= maxlon) {
+      effBox.add(util::geo::Box<double>(util::geo::Point<double>(minlon, minlat),
+                                        util::geo::Point<double>(maxlon, maxlat)));
+    }
+  }
+
+  // Pass A: Nodes → bbox membership and nohup
+  OsmIdSet bboxNodes, noHupNodes;
+  {
+    osmium::io::Reader reader(inPath, osmium::osm_entity_bits::node);
+    while (osmium::memory::Buffer buffer = reader.read()) {
+      for (auto& item : buffer) {
+        if (item.type() != osmium::item_type::node) continue;
+        const osmium::Node& n = static_cast<const osmium::Node&>(item);
+        if (!n.location()) continue;
+        double y = n.location().lat();
+        double x = n.location().lon();
+        const auto id = static_cast<osmid>(n.id());
+        if (effBox.size() == 0 || effBox.contains(util::geo::Point<double>(x, y))) bboxNodes.add(id);
+        for (const auto& tag : n.tags()) {
+          if (merged.nohup(tag.key(), tag.value())) { noHupNodes.add(id); break; }
+        }
+      }
+    }
+    reader.close();
+  }
+
+  // Pass B: Relations → keep/drop (build node_rels, way_rels) and capture tags
+  RelLst rels; RelMap node_rels, way_rels;
+  {
+    osmium::io::Reader reader(inPath, osmium::osm_entity_bits::relation);
+    while (osmium::memory::Buffer buffer = reader.read()) {
+      for (auto& item : buffer) {
+        if (item.type() != osmium::item_type::relation) continue;
+        const osmium::Relation& r = static_cast<const osmium::Relation&>(item);
+        AttrMap attrs;
+        AttrMap allAttrs;
+        for (const auto& t : r.tags()) {
+          allAttrs[t.key()] = t.value();
+          if (attrKeys[2].count(t.key())) attrs[t.key()] = t.value();
+        }
+        uint64_t keepFlags = merged.keep(allAttrs, OsmFilter::REL);
+        uint64_t dropFlags = merged.drop(allAttrs, OsmFilter::REL);
+        if (attrs.size() && keepFlags && !dropFlags) {
+          size_t idx = rels.rels.size();
+          rels.rels.push_back(attrs);
+          if (keepFlags & REL_NO_DOWN) rels.flat.insert(idx);
+          for (const auto& m : r.members()) {
+            if (m.type() == osmium::item_type::node) node_rels[static_cast<osmid>(m.ref())].push_back(idx);
+            else if (m.type() == osmium::item_type::way) way_rels[static_cast<osmid>(m.ref())].push_back(idx);
+          }
+        }
+      }
+    }
+    reader.close();
+  }
+
+  // Pass C: Ways → collect kept ways that touch bbox; gather needed nodes
+  OsmIdList keptWays; NIdMap nodes; NIdMultMap multNodes;
+  size_t ways_scanned = 0;
+  size_t ways_considered = 0;
+  size_t ways_touching = 0;
+  {
+    osmium::io::Reader reader(inPath, osmium::osm_entity_bits::way);
+    while (osmium::memory::Buffer buffer = reader.read()) {
+      for (auto& item : buffer) {
+        if (item.type() != osmium::item_type::way) continue;
+        ++ways_scanned;
+        const osmium::Way& w = static_cast<const osmium::Way&>(item);
+        AttrMap attrs; AttrMap allAttrs;
+        for (const auto& t : w.tags()) {
+          allAttrs[t.key()] = t.value();
+          if (attrKeys[1].count(t.key())) attrs[t.key()] = t.value();
+        }
+        bool keep = false;
+        if (OsmBuilder().relKeep(static_cast<osmid>(w.id()), way_rels, rels.flat)) keep = true;
+        else if (!allAttrs.empty() && merged.keep(allAttrs, OsmFilter::WAY) && !merged.drop(allAttrs, OsmFilter::WAY)) keep = true;
+        if (w.nodes().size() <= 1) keep = false;
+        if (!keep) continue;
+        ++ways_considered;
+        bool touches = (effBox.size() == 0);
+        for (const auto& nr : w.nodes()) {
+          if (bboxNodes.has(static_cast<osmid>(nr.ref()))) { touches = true; break; }
+        }
+        if (!touches) continue;
+        ++ways_touching;
+        keptWays.push_back(static_cast<osmid>(w.id()));
+        for (const auto& nr : w.nodes()) nodes[static_cast<osmid>(nr.ref())] = 0;
+      }
+    }
+    reader.close();
+  }
+  LOG(INFO) << "PBF filter (native): ways scanned=" << ways_scanned
+            << ", kept by rules=" << ways_considered
+            << ", touching bbox=" << ways_touching
+            << ", unique referenced nodes=" << nodes.size();
+
+  // Safety fallback: if native streaming filter kept no ways, use XML filter path then convert to PBF
+  if (keptWays.empty()) {
+    LOG(WARN) << "Native PBF filter kept 0 ways; falling back to XML filter path.";
+    std::string xmlIn = inPath;
+    bool madeXmlIn = false;
+    if (inPath.size() >= 4 && inPath.substr(inPath.size() - 4) == ".pbf") {
+      xmlIn = inPath.substr(0, inPath.size() - 4);
+      if (xmlIn.size() < 4 || xmlIn.substr(xmlIn.size() - 4) != ".osm") xmlIn += ".osm";
+      OsmPbfReader::convertToXml(inPath, xmlIn);
+      madeXmlIn = true;
+    }
+    std::string xmlOut = outPath;
+    if (xmlOut.size() >= 4 && xmlOut.substr(xmlOut.size() - 4) == ".pbf") xmlOut = outPath.substr(0, outPath.size() - 4);
+    if (xmlOut.size() < 4 || xmlOut.substr(xmlOut.size() - 4) != ".osm") xmlOut += ".osm";
+    {
+      pfaedle::osm::OsmBuilder b;
+      b.filterWrite(xmlIn, xmlOut, opts, bbox);
+    }
+    OsmPbfReader::convertToPbf(xmlOut, outPath);
+    if (madeXmlIn) std::remove(xmlIn.c_str());
+    std::remove(xmlOut.c_str());
+    return;
+  }
+
+  // Pass D: Write filtered output directly to PBF
+  osmium::io::Header header; header.set("generator", std::string("pfaedle/") + VERSION_FULL);
+  osmium::io::Writer writer(outPath, header, osmium::io::overwrite::allow);
+
+  // D1: Nodes — write nodes referenced by kept ways (nodes map), include selected tags as needed for node filters
+  {
+    osmium::io::Reader reader(inPath, osmium::osm_entity_bits::node);
+    size_t nodes_written = 0;
+    std::unordered_set<osmid> written_nodes;
+    while (osmium::memory::Buffer buffer = reader.read()) {
+      for (auto& item : buffer) {
+        if (item.type() != osmium::item_type::node) continue;
+        const osmium::Node& n = static_cast<const osmium::Node&>(item);
+        const auto nid = static_cast<osmid>(n.id());
+        // Decide if we should output this node:
+        bool should_write = false;
+        if (nodes.count(nid)) {
+          should_write = true;  // referenced by kept way
+        } else {
+          // Consider standalone nodes by XML semantics (keepNode)
+          if (n.location() && (effBox.size() == 0 || bboxNodes.has(nid))) {
+            AttrMap n_all; AttrMap n_attrs;
+            for (const auto& t : n.tags()) { n_all[t.key()] = t.value(); if (attrKeys[0].count(t.key())) n_attrs[t.key()] = t.value(); }
+            bool keep_by_rule = (!n_all.empty() && merged.keep(n_all, OsmFilter::NODE) && !merged.drop(n_all, OsmFilter::NODE));
+            bool keep_by_rel = OsmBuilder().relKeep(nid, node_rels, rels.flat);
+            if (keep_by_rule || keep_by_rel) {
+              should_write = true;
+              // Make it visible to relation emission step
+              nodes[nid] = 0;
+            }
+          }
+        }
+        if (!should_write) continue;
+        if (written_nodes.count(nid)) continue;  // avoid duplicates
+        osmium::memory::Buffer outbuf{1024, osmium::memory::Buffer::auto_grow::yes};
+        {
+          osmium::builder::NodeBuilder nb{outbuf};
+          nb.set_id(n.id());
+          if (n.location()) nb.set_location(n.location());
+          {
+            osmium::builder::TagListBuilder tlb{outbuf, &nb};
+            for (const auto& t : n.tags()) {
+              if (attrKeys[0].count(t.key())) tlb.add_tag(t.key(), t.value());
+            }
+          }
+        }
+  // finalize objects in buffer and write
+  outbuf.commit();
+  writer(std::move(outbuf));
+        ++nodes_written;
+        written_nodes.insert(nid);
+      }
+    }
+    reader.close();
+    LOG(INFO) << "PBF filter (native): nodes written=" << nodes_written;
+  }
+
+  // D2: Ways — write only kept ways with trimmed tags
+  std::sort(keptWays.begin(), keptWays.end());
+  {
+    osmium::io::Reader reader(inPath, osmium::osm_entity_bits::way);
+    size_t ways_written = 0;
+    while (osmium::memory::Buffer buffer = reader.read()) {
+      for (auto& item : buffer) {
+        if (item.type() != osmium::item_type::way) continue;
+        const osmium::Way& w = static_cast<const osmium::Way&>(item);
+        osmid wid = static_cast<osmid>(w.id());
+        if (!std::binary_search(keptWays.begin(), keptWays.end(), wid)) continue;
+        osmium::memory::Buffer outbuf{2048, osmium::memory::Buffer::auto_grow::yes};
+        {
+          osmium::builder::WayBuilder wb{outbuf};
+          wb.set_id(w.id());
+          {
+            osmium::builder::WayNodeListBuilder wnlb{outbuf, &wb};
+            for (const auto& nr : w.nodes()) wnlb.add_node_ref(nr.ref());
+          }
+          {
+            osmium::builder::TagListBuilder tlb{outbuf, &wb};
+            for (const auto& t : w.tags()) { if (attrKeys[1].count(t.key())) tlb.add_tag(t.key(), t.value()); }
+          }
+        }
+  // finalize objects in buffer and write
+  outbuf.commit();
+  writer(std::move(outbuf));
+        ++ways_written;
+      }
+    }
+    reader.close();
+    LOG(INFO) << "PBF filter (native): ways written=" << ways_written;
+  }
+
+  // D3: Relations — write only relations referencing kept nodes/ways, trim tags and members accordingly
+  {
+    osmium::io::Reader reader(inPath, osmium::osm_entity_bits::relation);
+    size_t rels_written = 0;
+    while (osmium::memory::Buffer buffer = reader.read()) {
+      for (auto& item : buffer) {
+        if (item.type() != osmium::item_type::relation) continue;
+        const osmium::Relation& r = static_cast<const osmium::Relation&>(item);
+  AttrMap attrs; AttrMap allAttrs;
+  for (const auto& t : r.tags()) { allAttrs[t.key()] = t.value(); if (attrKeys[2].count(t.key())) attrs[t.key()] = t.value(); }
+  uint64_t keepFlags = merged.keep(allAttrs, OsmFilter::REL);
+  uint64_t dropFlags = merged.drop(allAttrs, OsmFilter::REL);
+        if (!(attrs.size() && keepFlags && !dropFlags)) continue;
+        // Filter members to only those present in kept sets
+        std::vector<std::pair<osmium::item_type, std::pair<osmid, std::string>>> kept_members;
+        kept_members.reserve(r.members().size());
+        for (const auto& m : r.members()) {
+          if (m.type() == osmium::item_type::node) {
+            osmid id = static_cast<osmid>(m.ref());
+            if (nodes.count(id)) kept_members.push_back({m.type(), {id, std::string(m.role())}});
+          } else if (m.type() == osmium::item_type::way) {
+            osmid id = static_cast<osmid>(m.ref());
+            if (std::binary_search(keptWays.begin(), keptWays.end(), id)) kept_members.push_back({m.type(), {id, std::string(m.role())}});
+          }
+        }
+        // Keep relation if it references at least one kept way (even if no nodes present)
+        bool has_kept_way_member = false;
+        for (const auto& km : kept_members) if (km.first == osmium::item_type::way) { has_kept_way_member = true; break; }
+        if (kept_members.empty() || (!has_kept_way_member && kept_members.empty())) continue;
+        osmium::memory::Buffer outbuf{2048, osmium::memory::Buffer::auto_grow::yes};
+        {
+          osmium::builder::RelationBuilder rb{outbuf};
+          rb.set_id(r.id());
+          {
+            osmium::builder::RelationMemberListBuilder rmlb{outbuf, &rb};
+            for (const auto& km : kept_members) {
+              rmlb.add_member(km.first, km.second.first, km.second.second.c_str());
+            }
+          }
+          {
+            osmium::builder::TagListBuilder tlb{outbuf, &rb};
+            for (const auto& t : r.tags()) if (attrKeys[2].count(t.key())) tlb.add_tag(t.key(), t.value());
+          }
+        }
+  // finalize objects in buffer and write
+  outbuf.commit();
+  writer(std::move(outbuf));
+        ++rels_written;
+      }
+    }
+    reader.close();
+    LOG(INFO) << "PBF filter (native): relations written=" << rels_written;
+  }
+
+  writer.close();
 #endif
 }

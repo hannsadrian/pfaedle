@@ -211,64 +211,43 @@ int main(int argc, char** argv) {
       }
     }
     try {
-      // We always generate an XML filtered file first (as before)
-      // then optionally convert to PBF if requested.
+      // New behavior: if PBF output is requested, use native streaming filter directly.
       std::string filterTarget = cfg.writeOsm;
       bool wantPbf = (cfg.filterOutputFormat == "pbf");
-      std::string xmlTmp = cfg.writeOsm;
       if (wantPbf) {
-        // ensure .pbf extension on final path, and write XML to temp path
-        if (filterTarget.size() >= 4 &&
-            filterTarget.substr(filterTarget.size() - 4) == ".pbf") {
-          xmlTmp = filterTarget.substr(0, filterTarget.size() - 4) + ".osm";
-        } else {
-          // if no .pbf, keep original as final PBF path and temp xml next to it
+#ifdef OSMIUM_ENABLED
+        if (filterTarget.size() < 4 || filterTarget.substr(filterTarget.size() - 4) != ".pbf") {
           filterTarget += ".pbf";
-          xmlTmp = cfg.writeOsm;
-          if (xmlTmp.size() < 4 || xmlTmp.substr(xmlTmp.size() - 4) != ".osm")
-            xmlTmp += ".osm";
         }
-      }
-
-      // If input is PBF, convert it to a temporary XML first (filterWrite expects XML)
-      std::string inputXml = cfg.osmPath;
-      bool inputWasPbf = false;
-      if (cfg.osmPath.size() >= 4 && cfg.osmPath.substr(cfg.osmPath.size() - 4) == ".pbf") {
-#ifdef OSMIUM_ENABLED
-        inputWasPbf = true;
-        // Strip trailing .pbf and any preceding .osm extension to avoid .osm.osm
-        inputXml = cfg.osmPath.substr(0, cfg.osmPath.size() - 4);
-        if (inputXml.size() >= 4 && inputXml.substr(inputXml.size() - 4) == ".osm") {
-          // leave as-is
-        } else {
-          inputXml += ".osm";
-        }
-        LOG(INFO) << "Converting PBF input to temporary XML: " << inputXml << " ...";
-        OsmPbfReader::convertToXml(cfg.osmPath, inputXml);
+        LOG(INFO) << "Writing filtered OSM to " << filterTarget << " (native streaming PBF filter) ...";
+        // Use native streaming PBF filter; it has an internal XML fallback if it keeps zero ways
+        OsmPbfReader::filterToPbf(cfg.osmPath, filterTarget, opts, box);
+        LOG(INFO) << "Filtered PBF written to " << filterTarget;
 #else
-        LOG(ERROR) << "-X requested with PBF input, but libosmium was not found at build time.";
-        exit(static_cast<int>(RetCode::OSM_PARSE_ERR));
+        LOG(WARN) << "PBF filtered output requested but libosmium was not found at build time. "
+                     "Falling back to XML output.";
+        // Fall through to XML path below
+        wantPbf = false;
 #endif
       }
 
-      osmBuilder.filterWrite(inputXml, xmlTmp, opts, box);
-
-      if (wantPbf) {
+      if (!wantPbf) {
+        // XML output path: ensure input is XML (convert from PBF if necessary), then run filterWrite
+        std::string xmlOut = cfg.writeOsm;
+        if (xmlOut.size() < 4 || xmlOut.substr(xmlOut.size() - 4) != ".osm") xmlOut += ".osm";
+        std::string inputXml = cfg.osmPath;
+        if (cfg.osmPath.size() >= 4 && cfg.osmPath.substr(cfg.osmPath.size() - 4) == ".pbf") {
 #ifdef OSMIUM_ENABLED
-        try {
-          OsmPbfReader::convertToPbf(xmlTmp, filterTarget);
-          if (filterTarget != cfg.writeOsm) {
-            LOG(INFO) << "Filtered PBF written to " << filterTarget;
-          }
-        } catch (const std::exception& ex) {
-          LOG(WARN) << "PBF conversion failed (" << ex.what()
-                    << "), leaving XML at " << xmlTmp;
-        }
+          inputXml = cfg.osmPath.substr(0, cfg.osmPath.size() - 4);
+          if (inputXml.size() < 4 || inputXml.substr(inputXml.size() - 4) != ".osm") inputXml += ".osm";
+          LOG(INFO) << "Converting PBF input to temporary XML: " << inputXml << " ...";
+          OsmPbfReader::convertToXml(cfg.osmPath, inputXml);
 #else
-        LOG(WARN) << "PBF conversion requested but libosmium was not found at build time. "
-                     "Leaving XML at "
-                  << xmlTmp;
+          LOG(ERROR) << "XML filtered output requested but input is PBF and libosmium is unavailable.";
+          exit(static_cast<int>(RetCode::OSM_PARSE_ERR));
 #endif
+        }
+        osmBuilder.filterWrite(inputXml, xmlOut, opts, box);
       }
     } catch (const pfxml::parse_exc& ex) {
       LOG(ERROR) << "Could not parse OSM data, reason was:";

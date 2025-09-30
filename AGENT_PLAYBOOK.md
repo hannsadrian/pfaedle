@@ -786,29 +786,30 @@ Agent progress log (append new entries below):
   pr_url: ""
   status: opened
   scope:
-    - area: ingestion
-      summary: Added PBF scaffolding (flags, CMake detection, OsmPbfReader stub) and wiring with graceful fallbacks.
-    - area: docs
-      summary: Help text now documents --osm-format and --filter-output-format; default -X emits PBF when available.
-  datasets:
-    - name: freiburg_small
-      metrics_before:
-        parse_wall_ms: 157003
-        match_p95_ms: 0
-        peak_rss_mb: 578
-        shapes_size_bytes: 0
-      metrics_after:
-        parse_wall_ms: 0
-        match_p95_ms: 0
-        peak_rss_mb: 0
-        shapes_size_bytes: 0
-      quality_after:
-        stop_p95_m: null
-        forbidden_violations: null
-        simplification_hausdorff_p95_m: null
-        relation_coverage_pct: null
-      notes: Build succeeds without libosmium; PBF paths compile behind OSMIUM_ENABLED and log clear errors if requested without support.
-  flags_used:
+
+  - area: ingestion
+    summary: Added PBF scaffolding (flags, CMake detection, OsmPbfReader stub) and wiring with graceful fallbacks.
+  - area: docs
+    summary: Help text now documents --osm-format and --filter-output-format; default -X emits PBF when available.
+    datasets:
+  - name: freiburg_small
+    metrics_before:
+    parse_wall_ms: 157003
+    match_p95_ms: 0
+    peak_rss_mb: 578
+    shapes_size_bytes: 0
+    metrics_after:
+    parse_wall_ms: 0
+    match_p95_ms: 0
+    peak_rss_mb: 0
+    shapes_size_bytes: 0
+    quality_after:
+    stop_p95_m: null
+    forbidden_violations: null
+    simplification_hausdorff_p95_m: null
+    relation_coverage_pct: null
+    notes: Build succeeds without libosmium; PBF paths compile behind OSMIUM_ENABLED and log clear errors if requested without support.
+    flags_used:
     osm_format: auto
     relation_mode: off
     per_mot_graphs: false
@@ -817,9 +818,9 @@ Agent progress log (append new entries below):
     shape_simplify_tolerance_meters: 0
     shape_simplify_preserve_stops: true
     shape_deduplicate: true
-  next_actions:
-    - Implement full libosmium-based PBF streaming reader parity with XML path
-    - Add .pbf conversion in bench harness and parity tests XML vs PBF on small dataset
+    next_actions:
+  - Implement full libosmium-based PBF streaming reader parity with XML path
+  - Add .pbf conversion in bench harness and parity tests XML vs PBF on small dataset
 
 - timestamp: 2025-09-30 11:05:00Z
   actor: agent
@@ -827,6 +828,7 @@ Agent progress log (append new entries below):
   pr_url: ""
   status: opened
   scope:
+
   - area: bench
     summary: Added minimal benchmark harness (datasets.yaml, run_bench.sh, compute_quality.py, compare_reports.py) and metrics emission via --metrics-out.
   - area: docs
@@ -868,29 +870,30 @@ Agent progress log (append new entries below):
   pr_url: ""
   status: opened
   scope:
-    - area: ingestion
-      summary: Added CLI flags --osm-format and --filter-output-format; scaffolded PBF reader using libosmium with fallback; wired format selection in main; optional filtered PBF output for -X.
-    - area: docs
-      summary: Help text updated to mention PBF input and filter output formats.
-  datasets:
-    - name: freiburg_small
-      metrics_before:
-        parse_wall_ms: 157003
-        match_p95_ms: 0
-        peak_rss_mb: 578
-        shapes_size_bytes: 0
-      metrics_after:
-        parse_wall_ms: 0
-        match_p95_ms: 0
-        peak_rss_mb: 0
-        shapes_size_bytes: 0
-      quality_after:
-        stop_p95_m: null
-        forbidden_violations: null
-        simplification_hausdorff_p95_m: null
-        relation_coverage_pct: null
-      notes: Initial scaffolding does not change default behavior; PBF reader logs a placeholder message until streaming ingestion is fully implemented. Filtered PBF conversion uses libosmium when available.
-  flags_used:
+
+  - area: ingestion
+    summary: Added CLI flags --osm-format and --filter-output-format; scaffolded PBF reader using libosmium with fallback; wired format selection in main; optional filtered PBF output for -X.
+  - area: docs
+    summary: Help text updated to mention PBF input and filter output formats.
+    datasets:
+  - name: freiburg_small
+    metrics_before:
+    parse_wall_ms: 157003
+    match_p95_ms: 0
+    peak_rss_mb: 578
+    shapes_size_bytes: 0
+    metrics_after:
+    parse_wall_ms: 0
+    match_p95_ms: 0
+    peak_rss_mb: 0
+    shapes_size_bytes: 0
+    quality_after:
+    stop_p95_m: null
+    forbidden_violations: null
+    simplification_hausdorff_p95_m: null
+    relation_coverage_pct: null
+    notes: Initial scaffolding does not change default behavior; PBF reader logs a placeholder message until streaming ingestion is fully implemented. Filtered PBF conversion uses libosmium when available.
+    flags_used:
     osm_format: auto
     relation_mode: off
     per_mot_graphs: false
@@ -899,10 +902,10 @@ Agent progress log (append new entries below):
     shape_simplify_tolerance_meters: 0
     shape_simplify_preserve_stops: true
     shape_deduplicate: true
-  next_actions:
-    - Implement full libosmium streaming read to build Graph (bbox nodes, relations, ways, edges) with early filtering
-    - Add equivalence tests comparing XML vs PBF ingestion on small dataset
-    - Update CI to install libosmium/protozero on Linux/macOS runners
+    next_actions:
+  - Implement full libosmium streaming read to build Graph (bbox nodes, relations, ways, edges) with early filtering
+  - Add equivalence tests comparing XML vs PBF ingestion on small dataset
+  - Update CI to install libosmium/protozero on Linux/macOS runners
 
 - timestamp: 2025-09-30 16:30:00Z
   actor: agent
@@ -910,44 +913,44 @@ Agent progress log (append new entries below):
   pr_url: ""
   status: in-progress
   scope:
-    - area: build
-      summary: Bumped C++ standard to C++17. Auto-detect libosmium/protozero headers; define OSMIUM_ENABLED. Linked Expat to satisfy libosmium XML parser symbols. Added PFAEDLE_SILENCE_WARNINGS flag.
-    - area: ingestion
-      summary: Implemented native PBF streaming reader (OsmPbfReader::read) using libosmium. Multi-pass: nodes (bbox, node flags), relations (keep/drop, restrictions), ways pre-scan (collect needed nodes), nodes+ways (NodeLocationsForWays) with only-index-needed-nodes optimization. Preserved XML post-processing sequence to maintain behavior.
-    - area: tooling/docs
-      summary: Updated bench/run_bench.sh to acknowledge PBF support and mention --osm-format. Added convertToPbf and convertToXml utilities using libosmium any_input.
-    - area: filter (-X)
-      summary: For PBF input, -X now converts input to temp XML, runs existing XML-only filterWrite, and optionally converts filtered XML to PBF. Fixed temp filename derivation and registered xml_output so libosmium can write XML.
-  datasets:
-    - name: freiburg_small
-      metrics_before:
-        parse_wall_ms: 157003
-        peak_rss_mb: 578
-      metrics_after_pbf_input:
-        parse_wall_ms: ~12487–13292
-        peak_rss_mb: ~824–848
-      metrics_after_filtered_pbf_as_input:
-        parse_wall_ms: ~3027
-        peak_rss_mb: ~535
-      notes: PBF streaming ingestion achieves ~12–13s parse time vs 157s baseline (≈12× faster). Initial RSS rose to ~1.26GB due to full node indexing; reduced to ~0.82–0.85GB with only-index-needed-nodes and earlier frees. Using the filtered PBF as input yields ~3s ingestion and ~-43MB vs baseline RSS. Matching time differences (~+0.07–0.45s) are within noise.
-  flags_used:
+  - area: build
+    summary: Bumped C++ standard to C++17. Auto-detect libosmium/protozero headers; define OSMIUM_ENABLED. Linked Expat to satisfy libosmium XML parser symbols. Added PFAEDLE_SILENCE_WARNINGS flag.
+  - area: ingestion
+    summary: Implemented native PBF streaming reader (OsmPbfReader::read) using libosmium. Multi-pass: nodes (bbox, node flags), relations (keep/drop, restrictions), ways pre-scan (collect needed nodes), nodes+ways (NodeLocationsForWays) with only-index-needed-nodes optimization. Preserved XML post-processing sequence to maintain behavior.
+  - area: tooling/docs
+    summary: Updated bench/run_bench.sh to acknowledge PBF support and mention --osm-format. Added convertToPbf and convertToXml utilities using libosmium any_input.
+  - area: filter (-X)
+    summary: For PBF input, -X now converts input to temp XML, runs existing XML-only filterWrite, and optionally converts filtered XML to PBF. Fixed temp filename derivation and registered xml_output so libosmium can write XML.
+    datasets:
+  - name: freiburg_small
+    metrics_before:
+    parse_wall_ms: 157003
+    peak_rss_mb: 578
+    metrics_after_pbf_input:
+    parse_wall_ms: ~12487–13292
+    peak_rss_mb: ~824–848
+    metrics_after_filtered_pbf_as_input:
+    parse_wall_ms: ~3027
+    peak_rss_mb: ~535
+    notes: PBF streaming ingestion achieves ~12–13s parse time vs 157s baseline (≈12× faster). Initial RSS rose to ~1.26GB due to full node indexing; reduced to ~0.82–0.85GB with only-index-needed-nodes and earlier frees. Using the filtered PBF as input yields ~3s ingestion and ~-43MB vs baseline RSS. Matching time differences (~+0.07–0.45s) are within noise.
+    flags_used:
     osm_format: auto
     filter_output_format: pbf
     relation_mode: off
     per_mot_graphs: false
     cache_stop_pairs: false
     shape_simplification: off
-  fixes_and_learnings:
-    - getopt long-option collisions fixed by unique enum codes.
-    - libosmium requires modern C++; moved to C++17.
-    - Expat must be linked for libosmium XML reader paths (symbols XML_*).
-    - osmium::io::Writer must be passed by reference to osmium::apply; close writer explicitly.
-    - mmap index backends (Sparse/Dense) may be unavailable on Homebrew; fallback to FlexMem for portability.
-    - Avoid double .osm extension when converting from .osm.pbf.
-  known_gaps:
-    - -X filter still routes through XML intermediate; streaming PBF filter writer would remove both conversions.
-    - Ingestion metrics currently aggregate GTFS+OSM; consider splitting parse_wall_ms into gtfs_parse_ms and osm_parse_ms.
-  next_actions:
-    - Implement native streaming filter writer (PBF→PBF) mirroring OsmBuilder::filterWrite semantics; eliminate temp XML and conversions.
-    - Add pass-level timing logs (nodes, rels, ways scan, nodes+ways) for future tuning.
-    - Optional: CMake switch to force index backend when available (auto|flex|dense|sparse); keep FlexMem default.
+    fixes_and_learnings:
+  - getopt long-option collisions fixed by unique enum codes.
+  - libosmium requires modern C++; moved to C++17.
+  - Expat must be linked for libosmium XML reader paths (symbols XML\_\*).
+  - osmium::io::Writer must be passed by reference to osmium::apply; close writer explicitly.
+  - mmap index backends (Sparse/Dense) may be unavailable on Homebrew; fallback to FlexMem for portability.
+  - Avoid double .osm extension when converting from .osm.pbf.
+    known_gaps:
+  - -X filter still routes through XML intermediate; streaming PBF filter writer would remove both conversions.
+  - Ingestion metrics currently aggregate GTFS+OSM; consider splitting parse_wall_ms into gtfs_parse_ms and osm_parse_ms.
+    next_actions:
+  - Implement native streaming filter writer (PBF→PBF) mirroring OsmBuilder::filterWrite semantics; eliminate temp XML and conversions.
+  - Add pass-level timing logs (nodes, rels, ways scan, nodes+ways) for future tuning.
+  - Optional: CMake switch to force index backend when available (auto|flex|dense|sparse); keep FlexMem default.

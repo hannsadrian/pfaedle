@@ -1,7 +1,7 @@
 {
   "build": {
-    "git_sha": "v0.1.6-194-g79300d5-dirty",
-    "pfaedle_version": "v0.1.6-194-g79300d5-dirty"
+    "git_sha": "v0.1.6-195-g7fbf354-dirty",
+    "pfaedle_version": "v0.1.6-195-g7fbf354-dirty"
   },
   "config": {
     "cache_stop_pairs": false,
@@ -10,16 +10,16 @@
     "shape_simplification": "off"
   },
   "ingestion": {
-    "parse_wall_ms": 3026.601000
+    "parse_wall_ms": 3253.244000
   },
   "matching": {
-    "match_wall_ms_total": 2821.698000,
+    "match_wall_ms_total": 2735.004000,
     "trips_failed": 0,
     "trips_succeeded": 39671,
     "trips_total": 39671
   },
   "memory": {
-    "peak_rss_mb": 534.859375
+    "peak_rss_mb": 459.625000
   },
   "version": 1
 }
