@@ -43,20 +43,45 @@ It assumes the starting point is a fork of [ad-freiburg/pfaedle](https://github.
 
 ---
 
-## 2. High-Level Plan (Phases)
+## 2. High-Impact Plan (Reordered)
 
-1. Establish a benchmark and quality harness (no functional changes).
-2. Add PBF streaming input; update `-X` to write filtered `.osm.pbf`; keep XML as default fallback.
-3. Enforce per-MOT graph pruning; build mode-specific indexes.
-4. Add stop-to-stop path caching and result reuse.
-5. Add optional relation-aware matching:
-   - Soft constraints (bias weights) with automatic fallback.
-   - Optional hard constraints (restrict to corridor with buffer) when confident.
-6. Memory optimizations: compact IDs, CSR adjacency, fixed-point geometry, deduped polylines, incremental output.
-7. Shape complexity controls: pluggable simplification with tolerance; preserve stops; bounded deviation; deduplication of identical shapes.
-8. Optional experiments: advanced routing for bus networks (CH/MLD) if justified by benchmarks.
+Prioritize wins that cap memory, reduce time-to-first-work, and maximize parallelism on country-scale runs.
 
-Each phase is a small PR behind feature flags and includes updated docs, tests, and benchmark delta.
+1. Spatial sharding for matching (early parallelism, bounded RAM)
+
+- Partition trips by tiles (H3 or bbox clusters), build per-tile subgraphs with padding, match tiles in parallel.
+
+2. Strict bus graph pruning preset (smaller search space)
+
+- Default-on preset limiting bus graphs to bus-usable highways; exclude irrelevant classes unless bus is explicitly permitted.
+
+3. Trip de-duplication and stop-pair cache (dramatic reuse)
+
+- Compute once per route/direction pattern; reuse across departures.
+
+4. Parallelize preprocessing (remove single-core warmup)
+
+- Multi-thread NodeGrid/EdgeGrid and other indexes.
+
+5. Relation-aided soft corridors (where PTv2 exists)
+
+- Weight bias inside relation corridor with confidence scoring and automatic fallback.
+
+6. Auto-tuning for large datasets
+
+- Safer defaults (enable sharding, scale grid-size, disable heavy caches) based on data size.
+
+7. Memory layout improvements (compact structures)
+
+- ID compaction, CSR adjacency, fixed-point coords, deduped polylines.
+
+8. Shape simplification and deduplication (output size)
+
+- Optional, bounded deviation with stop preservation.
+
+9. Optional routing backend experiments (MLD/CH) if justified.
+
+Each phase ships behind flags with tests, benchmarks, and updated docs.
 
 ---
 
@@ -428,7 +453,7 @@ to be determined.
 
 ---
 
-## 7. Step-by-Step Implementation Guide (Agent Tasks)
+## 7. Step-by-Step Implementation Guide (Agent Tasks — Revised Order)
 
 Create small, reviewable PRs in the following order. Each PR must include:
 
@@ -456,64 +481,56 @@ Create small, reviewable PRs in the following order. Each PR must include:
   - Equivalence: run small dataset with XML vs PBF; shape diffs within thresholds.
 - Benchmarks: show ingestion speedup and memory reduction.
 
-### PR-3: Per-MOT Graph Pruning
+### PR-3: Spatial Sharding for Matching
 
-- Implement strict tag filters and separate graphs by MOT.
-- Spatial index per graph for snapping.
-- Tests:
-  - Ensure forbidden-edge violations remain 0.
-- Benchmarks: reduced matching time; equal or better quality.
+- Tile trips by H3 or bbox clusters; crop OSM per tile with padding; run tiles in parallel.
+- Flags: `--shard-mode off|auto|h3`, `--shard-size-km`, `--shard-padding-m`, `--shard-parallelism`.
+- Tests: correctness on tiny multi-tile dataset; merging outputs is stable.
+- Benchmarks: peak RSS bounded (target ≤ 8–12 GB on national bus), early multi-core utilization.
 
-### PR-4: Stop-to-Stop Caching
+### PR-4: Strict Bus Graph Pruning Preset
 
-- In-memory cache keyed by stop-pairs and config hash.
-- Precompute adjacent stop pairs per route/direction.
-- Config flag `--cache-stop-pairs`.
-- Tests: idempotence and correctness with cache hits.
-- Benchmarks: improved p50/p95 times; report cache hit rate.
+- Add `--bus-graph-preset strict|baseline` (default: strict for bus unless disabled).
+- Include only bus-usable highways (bus=yes|designated, lanes, busway); exclude track/path/footway/cycleway/private unless bus-allowed; motorways only if bus=yes.
+- Tests: zero forbidden-edge violations; route plausibility unchanged.
+- Benchmarks: 30–50% node/edge reduction on bus graph; faster matching.
 
-### PR-5: Relation-Aware Matching (Soft)
+### PR-5: Stop-to-Stop Cache and Trip De-duplication
 
-- Index OSM PTv2 relations; relation mapping with confidence scoring.
-- Corridor build and weight biasing; auto-fallback logic.
-- Flags: `--relation-mode soft`, `--relation-confidence-threshold`, `--relation-buffer-meters`, `--relation-min-coverage`.
-- Tests:
-  - Trips with known relations: coverage and improved performance.
-  - Trips without relations: no regression.
-- Benchmarks: 3–10x speedups for relation-covered lines.
+- Cache segments by (route_id, direction_id, stop_seq signature, mot, graph_hash, params_hash).
+- Flags: `--cache-stop-pairs`, `--cache-dir`, `--cache-max-gb`.
+- Tests: reuse across identical departures; correctness under cache hits.
+- Benchmarks: ≥30% fewer computations on frequent services.
 
-### PR-6: Relation-Aware Matching (Hard, Optional)
+### PR-6: Parallelize Preprocessing
 
-- Restrict matching to corridor+halo when confidence is high.
-- Safe fallback to soft/unconstrained on disconnects or low coverage.
-- Additional tests and benchmarks.
+- Multi-thread NodeGrid/EdgeGrid/index builds; remove single-core warmup bottleneck.
+- Benchmarks: 3–5x preprocessing speedup on 10+ cores; earlier CPU fan-out.
 
-### PR-7: Memory Layout Optimizations
+### PR-7: Relation-Aided Matching (Soft)
 
-- ID compaction, CSR adjacency, coordinate quantization.
-- Deduped polylines, incremental output.
-- Heap profiling (massif/heaptrack) before/after.
-- Show peak RSS reduction without quality loss.
+- Index PTv2 relations, build corridors, apply weight bias with confidence and fallback.
+- Flags: as previously specified (`--relation-mode soft`, etc.).
+- Benchmarks: 10–20% speedup where relations exist; no regressions elsewhere.
 
-### PR-8: Shape Complexity Controls
+### PR-8: Auto-Tuning for Large Datasets
 
-- Implement simplification pipeline:
-  - Methods: DP and VW.
-  - Preserve stops and critical vertices; bound max deviation.
-  - Optional cap on points; deduplicate identical shapes.
-- Flags: `--shape-simplification`, `--shape-simplify-tolerance-meters`, `--shape-simplify-max-points`, `--shape-simplify-preserve-stops`, `--shape-simplify-max-deviation-meters`, `--shape-deduplicate`.
-- Tests:
-  - Unit tests for DP/VW correctness on canonical polylines.
-  - Ensure stop coordinates remain in polyline when preserve_stops=true.
-  - Verify Hausdorff error ≤ max deviation.
-- Benchmarks:
-  - Report points reduction and shapes.txt size savings.
-  - Verify quality metrics unaffected beyond allowed deviation.
+- Heuristics to auto-enable sharding, scale `--grid-size`, and disable heavy caches on large bboxes.
+- Tests: defaults adapt on country/state datasets; still conservative on small regions.
 
-### PR-9: Optional Routing Backend Experiments
+### PR-9: Memory Layout Optimizations
 
-- Add `--routing-backend` option; implement MLD/CH for bus graphs if wins are clear.
-- Benchmarks: justify complexity; otherwise discard.
+- ID compaction, CSR adjacency, coord quantization, deduped polylines.
+- Benchmarks: 10–20% RAM reduction; equal throughput.
+
+### PR-10: Shape Complexity Controls
+
+- Implement simplification and dedup as described; defaults off.
+- Benchmarks: 40–60% shapes.txt reduction with bounded deviation.
+
+### PR-11: Optional Routing Backend Experiments
+
+- Evaluate MLD/CH backends for bus graphs; proceed only if clear wins.
 
 ---
 
