@@ -481,56 +481,38 @@ Create small, reviewable PRs in the following order. Each PR must include:
   - Equivalence: run small dataset with XML vs PBF; shape diffs within thresholds.
 - Benchmarks: show ingestion speedup and memory reduction.
 
-### PR-3: Spatial Sharding for Matching
-
-- Tile trips by H3 or bbox clusters; crop OSM per tile with padding; run tiles in parallel.
-- Flags: `--shard-mode off|auto|h3`, `--shard-size-km`, `--shard-padding-m`, `--shard-parallelism`.
-- Tests: correctness on tiny multi-tile dataset; merging outputs is stable.
-- Benchmarks: peak RSS bounded (target ≤ 8–12 GB on national bus), early multi-core utilization.
-
-### PR-4: Strict Bus Graph Pruning Preset
-
-- Add `--bus-graph-preset strict|baseline` (default: strict for bus unless disabled).
-- Include only bus-usable highways (bus=yes|designated, lanes, busway); exclude track/path/footway/cycleway/private unless bus-allowed; motorways only if bus=yes.
-- Tests: zero forbidden-edge violations; route plausibility unchanged.
-- Benchmarks: 30–50% node/edge reduction on bus graph; faster matching.
-
-### PR-5: Stop-to-Stop Cache and Trip De-duplication
+### PR-3: Stop-to-Stop Cache and Trip De-duplication
 
 - Cache segments by (route_id, direction_id, stop_seq signature, mot, graph_hash, params_hash).
 - Flags: `--cache-stop-pairs`, `--cache-dir`, `--cache-max-gb`.
-- Tests: reuse across identical departures; correctness under cache hits.
+- Tests: reuse across identical departures and dataset updates; correctness under cache hits.
 - Benchmarks: ≥30% fewer computations on frequent services.
 
-### PR-6: Parallelize Preprocessing
+### PR-4: Parallelize Preprocessing
 
 - Multi-thread NodeGrid/EdgeGrid/index builds; remove single-core warmup bottleneck.
 - Benchmarks: 3–5x preprocessing speedup on 10+ cores; earlier CPU fan-out.
 
-### PR-7: Relation-Aided Matching (Soft)
+### PR-5: Relation-Aided Matching (Soft)
 
 - Index PTv2 relations, build corridors, apply weight bias with confidence and fallback.
 - Flags: as previously specified (`--relation-mode soft`, etc.).
 - Benchmarks: 10–20% speedup where relations exist; no regressions elsewhere.
 
-### PR-8: Auto-Tuning for Large Datasets
+### PR-6: Auto-Tuning for Large Datasets
 
 - Heuristics to auto-enable sharding, scale `--grid-size`, and disable heavy caches on large bboxes.
 - Tests: defaults adapt on country/state datasets; still conservative on small regions.
 
-### PR-9: Memory Layout Optimizations
+### PR-7: Memory Layout Optimizations
 
 - ID compaction, CSR adjacency, coord quantization, deduped polylines.
 - Benchmarks: 10–20% RAM reduction; equal throughput.
 
-### PR-10: Shape Complexity Controls
+### PR-8: Shape Complexity Controls
 
 - Implement simplification and dedup as described; defaults off.
 - Benchmarks: 40–60% shapes.txt reduction with bounded deviation.
-
-### PR-11: Optional Routing Backend Experiments
-
-- Evaluate MLD/CH backends for bus graphs; proceed only if clear wins.
 
 ---
 
@@ -930,6 +912,7 @@ Agent progress log (append new entries below):
   pr_url: ""
   status: in-progress
   scope:
+
   - area: build
     summary: Bumped C++ standard to C++17. Auto-detect libosmium/protozero headers; define OSMIUM_ENABLED. Linked Expat to satisfy libosmium XML parser symbols. Added PFAEDLE_SILENCE_WARNINGS flag.
   - area: ingestion
