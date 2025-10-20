@@ -60,7 +60,7 @@ ShapeBuilder::ShapeBuilder(
     pfaedle::trgraph::Graph* g, router::FeedStops* fStops,
     osm::Restrictor* restr,
     const pfaedle::statsimiclassifier::StatsimiClassifier* classifier,
-    router::Router* router, const config::Config& cfg)
+    router::Router* router, TripCache* tripCache, const config::Config& cfg)
     : _feed(feed),
       _mots(mots),
       _motCfg(motCfg),
@@ -70,7 +70,8 @@ ShapeBuilder::ShapeBuilder(
       _curShpCnt(0),
       _restr(restr),
       _classifier(classifier),
-      _router(router) {
+      _router(router),
+      _tripCache(tripCache) {
   pfaedle::osm::BBoxIdx box(cfg.boxPadding);
   ShapeBuilder::getGtfsBox(feed, mots, cfg.shapeTripId, cfg.dropShapes, &box,
                            _motCfg.osmBuildOpts.maxSpeed, 0, cfg.verbosity);
@@ -352,10 +353,78 @@ std::map<size_t, EdgeListHops> ShapeBuilder::shapeify(
 
   std::map<size_t, EdgeListHops> ret;
 
-  const auto& routes = route(trie, getECM(trie), hopCache);
+  const bool useTripCache = _tripCache && _tripCache->enabled();
 
-  for (const auto& route : routes) {
-    ret[route.first] = route.second;
+  std::unordered_map<const Trip*, size_t> missingTripToLeaf;
+  std::unordered_map<size_t, std::string> missingLeafKeys;
+  TripTrie<pfaedle::gtfs::Trip> missingTrie;
+  bool missingTrieValid = true;
+
+  if (useTripCache) {
+    const bool timeExact =
+        _motCfg.routingOpts.transPenMethod == "timenorm";
+
+    for (const auto& leaf : trie->getNdTrips()) {
+      if (leaf.second.empty()) continue;
+
+      Trip* trip = leaf.second.front();
+      const std::string key = TripCache::computeTripKey(trip);
+      EdgeListHops hops;
+      if (_tripCache->lookup(key, &hops)) {
+        ret.emplace(leaf.first, std::move(hops));
+      } else {
+        missingLeafKeys.emplace(leaf.first, key);
+        missingTripToLeaf.emplace(trip, leaf.first);
+        if (!missingTrie.addTrip(trip, getRAttrs(trip), timeExact, false)) {
+          missingTrieValid = false;
+        }
+      }
+    }
+
+    if (missingLeafKeys.empty()) {
+      LOG(VDEBUG) << "Finished map-matching for trie " << trie
+                  << " (all trips served from cache)";
+      return ret;
+    }
+  }
+
+  const TripTrie<pfaedle::gtfs::Trip>* activeTrie = trie;
+  if (useTripCache && missingTrieValid && !missingTripToLeaf.empty()) {
+    activeTrie = &missingTrie;
+  }
+
+  const auto& routes = route(activeTrie, getECM(activeTrie), hopCache);
+  const auto& activeLeaves = activeTrie->getNdTrips();
+
+  for (const auto& routeRes : routes) {
+    size_t targetLeaf = routeRes.first;
+    const EdgeListHops& hops = routeRes.second;
+
+    if (useTripCache) {
+      auto leafIt = activeLeaves.find(routeRes.first);
+      if (leafIt == activeLeaves.end() || leafIt->second.empty()) continue;
+
+      Trip* repr = leafIt->second.front();
+
+      if (activeTrie == &missingTrie) {
+        auto missIt = missingTripToLeaf.find(repr);
+        if (missIt == missingTripToLeaf.end()) continue;
+        targetLeaf = missIt->second;
+      } else {
+        if (missingLeafKeys.find(targetLeaf) == missingLeafKeys.end()) {
+          continue;
+        }
+      }
+
+      auto keyIt = missingLeafKeys.find(targetLeaf);
+      if (keyIt != missingLeafKeys.end()) {
+        ret[targetLeaf] = hops;
+        _tripCache->store(keyIt->second, ret[targetLeaf]);
+        continue;
+      }
+    }
+
+    ret[targetLeaf] = hops;
   }
 
   LOG(VDEBUG) << "Finished map-matching for trie " << trie;
@@ -369,12 +438,28 @@ EdgeListHops ShapeBuilder::shapeify(Trip* trip) {
               << trip->getRoute()->getType() << "(sn=" << trip->getShortname()
               << ", rsn=" << trip->getRoute()->getShortName()
               << ", rln=" << trip->getRoute()->getLongName() << ")";
+  std::string cacheKey;
+  EdgeListHops cached;
+  const bool useTripCache = _tripCache && _tripCache->enabled();
+
+  if (useTripCache) {
+    cacheKey = TripCache::computeTripKey(trip);
+    if (_tripCache->lookup(cacheKey, &cached)) {
+      return cached;
+    }
+  }
+
   TripTrie<pfaedle::gtfs::Trip> trie;
   trie.addTrip(trip, getRAttrs(trip),
                _motCfg.routingOpts.transPenMethod == "timenorm", false);
   const auto& routes = route(&trie, getECM(&trie), 0);
 
-  return routes.begin()->second;
+  const EdgeListHops& result = routes.begin()->second;
+  if (useTripCache) {
+    _tripCache->store(cacheKey, result);
+  }
+
+  return result;
 }
 
 // _____________________________________________________________________________

@@ -1,0 +1,35 @@
+{
+  "build": {
+    "git_sha": "v0.1.6-198-g79f2c97-dirty",
+    "pfaedle_version": "v0.1.6-198-g79f2c97-dirty"
+  },
+  "cache": {
+    "bytes_read": 875436.000000,
+    "bytes_written": 408460.000000,
+    "errors": 197.000000,
+    "evictions": 0.000000,
+    "hits": 487.000000,
+    "misses": 197.000000,
+    "stores": 197.000000,
+    "stores_skipped": 0.000000
+  },
+  "config": {
+    "cache_stop_pairs": false,
+    "per_mot_graphs": false,
+    "relation_mode": "off",
+    "shape_simplification": "off"
+  },
+  "ingestion": {
+    "parse_wall_ms": 3244.361000
+  },
+  "matching": {
+    "match_wall_ms_total": 946.618000,
+    "trips_failed": 0,
+    "trips_succeeded": 39671,
+    "trips_total": 39671
+  },
+  "memory": {
+    "peak_rss_mb": 337.453125
+  },
+  "version": 1
+}

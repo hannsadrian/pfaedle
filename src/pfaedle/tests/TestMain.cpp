@@ -1,12 +1,20 @@
 // Copyright 2020
 // Author: Patrick Brosi
 
-#include "pfaedle/osm/Restrictor.h"
+#include <cstdint>
+#include <filesystem>
+#include <getopt.h>
+#include <unistd.h>
 
 #define private public
 #include "pfaedle/router/Router.h"
 #undef private
 #define private private
+
+#include "pfaedle/config/ConfigReader.h"
+#include "pfaedle/osm/Restrictor.h"
+#include "pfaedle/router/TripCache.h"
+#include "pfaedle/trgraph/Graph.h"
 
 using pfaedle::osm::Restrictor;
 using pfaedle::router::CostMatrix;
@@ -303,6 +311,85 @@ int main(int argc, char** argv) {
     TEST(cmGet(costM, 1, 1), ==, approx(10 + 50));
     TEST(cmGet(costM, 2, 0), >=, maxTime);
     TEST(cmGet(costM, 2, 1), >=, maxTime);
+  }
+
+  {
+    optind = 0;
+    char arg0[] = "pfaedle";
+    char arg1[] = "--trip-cache";
+    char arg2[] = "--trip-cache-dir";
+    char arg3[] = "/tmp";
+    char arg4[] = "--trip-cache-max-bytes";
+    char arg5[] = "4096";
+    char* argvCfg[] = {arg0, arg1, arg2, arg3, arg4, arg5};
+    int argcCfg = sizeof(argvCfg) / sizeof(argvCfg[0]);
+
+    pfaedle::config::Config cfg;
+    pfaedle::config::ConfigReader::read(&cfg, argcCfg, argvCfg);
+
+    TEST(cfg.tripCache.enabled, ==, true);
+    TEST(cfg.tripCache.directory, ==, std::string(arg3));
+    TEST(cfg.tripCache.maxBytes, ==, (uint64_t)4096);
+  }
+
+  {
+    optind = 0;
+    char arg0[] = "pfaedle";
+    char arg1[] = "--trip-cache";
+    char* argvCfg[] = {arg0, arg1};
+    int argcCfg = sizeof(argvCfg) / sizeof(argvCfg[0]);
+
+    pfaedle::config::Config cfg;
+    pfaedle::config::ConfigReader::read(&cfg, argcCfg, argvCfg);
+
+    TEST(cfg.tripCache.enabled, ==, true);
+    TEST(cfg.tripCache.directory, ==, cfg.dbgOutputPath);
+  }
+
+  {
+    namespace fs = std::filesystem;
+    fs::path cacheRoot = fs::temp_directory_path() / "pfaedle-trip-cache-test";
+    if (fs::exists(cacheRoot)) fs::remove_all(cacheRoot);
+
+    pfaedle::trgraph::Graph graph;
+    auto* n1 = graph.addNd(POINT{0, 0});
+    auto* n2 = graph.addNd(POINT{1, 0});
+    auto* edge = graph.addEdg(n1, n2);
+
+    pfaedle::router::TripCacheOptions opts;
+    opts.enabled = true;
+    opts.baseDir = cacheRoot.string();
+    opts.maxBytes = 0;
+    opts.graphHash =
+        pfaedle::router::TripCache::computeGraphFingerprint(&graph);
+    opts.paramsHash = "test-params";
+
+    pfaedle::router::TripCache cache(opts, &graph);
+    TEST(cache.enabled(), ==, true);
+
+    pfaedle::router::EdgeListHop hop;
+    hop.edges.push_back(edge);
+    hop.start = edge;
+    hop.end = edge;
+    hop.progrStart = 0.0;
+    hop.progrEnd = 1.0;
+
+    pfaedle::router::EdgeListHops hops{hop};
+    std::string key = "trip-cache-test-key";
+    cache.store(key, hops);
+
+    pfaedle::router::EdgeListHops loaded;
+    bool hit = cache.lookup(key, &loaded);
+    TEST(hit, ==, true);
+    TEST(loaded.size(), ==, (size_t)1);
+    TEST(loaded.front().edges.size(), ==, (size_t)1);
+    TEST(loaded.front().edges.front(), ==, edge);
+
+    auto stats = cache.stats();
+    TEST(stats.hits, ==, (size_t)1);
+    TEST(stats.stores, ==, (size_t)1);
+
+    fs::remove_all(cacheRoot);
   }
 
   exit(0);

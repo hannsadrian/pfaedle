@@ -23,6 +23,7 @@
 #include "pfaedle/router/Misc.h"
 #include "pfaedle/router/Router.h"
 #include "pfaedle/router/Stats.h"
+#include "pfaedle/router/TripCache.h"
 #include "pfaedle/router/TripTrie.h"
 #include "pfaedle/statsimi-classifier/StatsimiClassifier.h"
 #include "pfaedle/trgraph/Graph.h"
@@ -56,7 +57,8 @@ class ShapeBuilder {
       pfaedle::gtfs::Feed* feed, MOTs mots, const config::MotConfig& motCfg,
       trgraph::Graph* g, router::FeedStops* stops, osm::Restrictor* restr,
       const pfaedle::statsimiclassifier::StatsimiClassifier* classifier,
-      router::Router* router, const config::Config& cfg);
+      router::Router* router, TripCache* tripCache,
+      const config::Config& cfg);
 
   Stats shapeify(pfaedle::netgraph::Graph* outNg);
 
@@ -97,6 +99,7 @@ class ShapeBuilder {
   GrpCache _grpCache;
 
   router::Router* _router;
+    TripCache* _tripCache;
 
   TripForests clusterTrips(pfaedle::gtfs::Feed* f, MOTs mots);
   void buildNetGraph(TrGraphEdgs* edgs, pfaedle::netgraph::Graph* ng) const;

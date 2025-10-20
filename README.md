@@ -68,6 +68,14 @@ bench/run_bench.sh --osm path/to/data.osm.bz2 --gtfs path/to/feed.zip --out repo
 
 This writes `report.json` with ingestion, matching and memory fields that can be compared using `bench/compare_reports.py`.
 
+### Trip cache
+
+Repeatedly processing the same GTFS + OSM data can be accelerated with the trip cache. Enable it via `--trip-cache`; optionally customize the storage directory with `--trip-cache-dir` (defaults to the debug output path) and bound its size with `--trip-cache-max-bytes`.
+
+Cache entries are stored beneath a versioned subdirectory (currently `trip-cache/v3/...`). When upgrading to a newer release, a fresh version folder is created automatically so that stale entries from older formats are left untouched.
+
+When enabled, runs will emit aggregate cache statistics in the log output and in the JSON reports produced by `--metrics-out` or `--stats`.
+
 By default, shapes are only calculated for trips that don't have a shape in the
 input feed. To drop all existing shapes, use the `-D` flag.
 

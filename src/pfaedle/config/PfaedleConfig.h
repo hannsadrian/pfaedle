@@ -5,6 +5,7 @@
 #ifndef PFAEDLE_CONFIG_PFAEDLECONFIG_H_
 #define PFAEDLE_CONFIG_PFAEDLECONFIG_H_
 
+#include <cstdint>
 #include <set>
 #include <sstream>
 #include <string>
@@ -17,6 +18,12 @@ namespace pfaedle {
 namespace config {
 
 using ad::cppgtfs::gtfs::Route;
+
+struct TripCacheConfig {
+  bool enabled = false;
+  std::string directory;
+  uint64_t maxBytes = 0;
+};
 
 struct Config {
   Config()
@@ -38,11 +45,12 @@ struct Config {
         noTrie(false),
         noHopCache(false),
         writeStats(false),
-        parseAdditionalGTFSFields(false),
+  parseAdditionalGTFSFields(false),
         gridSize(2000 / util::geo::M_PER_DEG),
         boxPadding(20000),
         gaussianNoise(0),
-        verbosity(0) {}
+  verbosity(0),
+  tripCache() {}
   std::string dbgOutputPath;
   std::string solveMethod;
   std::string shapeTripId;
@@ -78,6 +86,7 @@ struct Config {
   double boxPadding;
   double gaussianNoise;
   uint8_t verbosity;
+  TripCacheConfig tripCache;
 
   std::string toString() {
     std::stringstream ss;
@@ -103,6 +112,9 @@ struct Config {
        << "no-a-star: " << noAStar << "\n"
        << "no-trie: " << noTrie << "\n"
        << "no-hop-cache: " << noHopCache << "\n"
+  << "trip-cache-enabled: " << tripCache.enabled << "\n"
+  << "trip-cache-dir: " << tripCache.directory << "\n"
+  << "trip-cache-max-bytes: " << tripCache.maxBytes << "\n"
        << "verbosity: " << verbosity << "\n"
        << "parse-additional-gtfs-fields: " << parseAdditionalGTFSFields << "\n"
        << "write-stats: " << writeStats << "\n"

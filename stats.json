@@ -1,0 +1,60 @@
+{
+  "statistics": {
+    "dijkstra_iters": 7631843,
+    "graph_dimension": {
+      "bus": {
+        "num_edges": 86646,
+        "num_nodes": 38850
+      },
+      "coach": {
+        "num_edges": 0,
+        "num_nodes": 0
+      },
+      "ferry": {
+        "num_edges": 0,
+        "num_nodes": 0
+      },
+      "funicular": {
+        "num_edges": 0,
+        "num_nodes": 0
+      },
+      "gondola": {
+        "num_edges": 0,
+        "num_nodes": 0
+      },
+      "rail": {
+        "num_edges": 0,
+        "num_nodes": 0
+      },
+      "tram-subway": {
+        "num_edges": 2277,
+        "num_nodes": 4012
+      }
+    },
+    "gtfs_avg_hop_dist": 452.5855864876,
+    "gtfs_num_stations": 1011,
+    "gtfs_num_trips": 39671,
+    "num_edges_tot": 88923.0000000000,
+    "num_nodes_tot": 42862.0000000000,
+    "num_trie_leafs": 684,
+    "num_tries": 210,
+    "peak-memory": "337.45 MB",
+    "peak-memory-bytes": 353845248,
+    "time_read_gtfs": 572.4920000000,
+    "time_read_osm": 2671.8690000000,
+    "time_solve": 946.6180000000,
+    "time_tot": 6880.3240000000,
+    "trip_cache": {
+      "bytes_read": 875436.0000000000,
+      "bytes_read_human": "854.9 kB",
+      "bytes_written": 408460.0000000000,
+      "bytes_written_human": "398.9 kB",
+      "errors": 197.0000000000,
+      "evictions": 0.0000000000,
+      "hits": 487.0000000000,
+      "misses": 197.0000000000,
+      "stores": 197.0000000000,
+      "stores_skipped": 0.0000000000
+    }
+  }
+}

@@ -7,6 +7,7 @@
 #include <exception>
 #include <iostream>
 #include <string>
+#include <cstdlib>
 #include "pfaedle/Def.h"
 #include "pfaedle/_config.h"
 #include "pfaedle/config/ConfigReader.h"
@@ -119,6 +120,12 @@ void ConfigReader::help(const char* bin) {
             << "Disable trip tries \n"
             << std::setw(35) << "  --no-hop-cache"
             << "Disable hop cache \n"
+            << std::setw(35) << "  --trip-cache"
+            << "Enable trip-level result caching\n"
+            << std::setw(35) << "     --trip-cache-dir arg"
+            << "Directory for trip cache entries\n"
+            << std::setw(35) << "     --trip-cache-max-bytes arg"
+            << "Max trip cache size in bytes (0 = unlimited)\n"
             << std::setw(35) << "  --stats"
             << "write stats to stats.json\n"
             << std::setw(35) << "  -W [ --warn ]"
@@ -133,7 +140,14 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
   bool printOpts = false;
 
   // Use distinct values > 255 for long-only options to avoid collisions
-  enum { OPT_METRICS_OUT = 101, OPT_OSM_FORMAT = 1001, OPT_FILTER_OUT_FMT = 1002 };
+  enum {
+    OPT_METRICS_OUT = 101,
+    OPT_OSM_FORMAT = 1001,
+    OPT_FILTER_OUT_FMT = 1002,
+    OPT_TRIP_CACHE = 1003,
+    OPT_TRIP_CACHE_DIR = 1004,
+    OPT_TRIP_CACHE_MAX_BYTES = 1005
+  };
 
   struct option ops[] = {{"output", required_argument, 0, 'o'},
                          {"input", required_argument, 0, 'i'},
@@ -162,6 +176,11 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
                          {"write-colors", no_argument, 0, 13},
                          {"stats", no_argument, 0, 14},
                          {"no-hop-cache", no_argument, 0, 15},
+                         {"trip-cache", no_argument, 0, OPT_TRIP_CACHE},
+                         {"trip-cache-dir", required_argument, 0,
+                          OPT_TRIP_CACHE_DIR},
+                         {"trip-cache-max-bytes", required_argument, 0,
+                          OPT_TRIP_CACHE_MAX_BYTES},
                          {"gaussian-noise", required_argument, 0, 16},
                          {"warn", no_argument, 0, 'W'},
                          {"keep-additional-gtfs-fields", no_argument, 0, 'F'},
@@ -249,6 +268,17 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
       case 15:
         cfg->noHopCache = true;
         break;
+      case OPT_TRIP_CACHE:
+        cfg->tripCache.enabled = true;
+        break;
+      case OPT_TRIP_CACHE_DIR:
+        cfg->tripCache.directory = optarg;
+        cfg->tripCache.enabled = true;
+        break;
+      case OPT_TRIP_CACHE_MAX_BYTES:
+        cfg->tripCache.maxBytes = strtoull(optarg, nullptr, 10);
+        cfg->tripCache.enabled = true;
+        break;
       case 16:
         cfg->gaussianNoise = atof(optarg);
         break;
@@ -294,6 +324,10 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
     const auto& mots =
         ad::cppgtfs::gtfs::flat::Route::getTypesFromString(util::trim(motStr));
     cfg->mots.insert(mots.begin(), mots.end());
+  }
+
+  if (cfg->tripCache.enabled && cfg->tripCache.directory.empty()) {
+    cfg->tripCache.directory = cfg->dbgOutputPath;
   }
 
   if (printOpts)

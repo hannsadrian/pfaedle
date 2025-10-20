@@ -26,6 +26,7 @@
 #include "pfaedle/netgraph/Graph.h"
 #include "pfaedle/osm/OsmIdSet.h"
 #include "pfaedle/router/ShapeBuilder.h"
+#include "pfaedle/router/TripCache.h"
 #include "pfaedle/router/Stats.h"
 #include "pfaedle/statsimi-classifier/StatsimiClassifier.h"
 #include "pfaedle/trgraph/Graph.h"
@@ -96,9 +97,6 @@ void gtfsWarnCb(std::string msg) { LOG(WARN) << msg; }
 int main(int argc, char** argv) {
   // disable output buffering for standard output
   setbuf(stdout, NULL);
-
-  // initialize randomness
-  srand(time(NULL) + rand());  // NOLINT
 
   // use utf8 locale
   std::setlocale(LC_ALL, "en_US.utf8");
@@ -292,6 +290,8 @@ int main(int argc, char** argv) {
   double tOsmBuild = 0;
   std::map<std::string, std::pair<size_t, size_t>> graphDimensions;
   std::vector<double> hopDists;
+  pfaedle::router::TripCacheStats totalTripCacheStats;
+  bool anyTripCacheEnabled = false;
 
   for (const auto& motCfg : motCfgReader.getConfigs()) {
     std::string filePost;
@@ -317,6 +317,28 @@ int main(int argc, char** argv) {
       ShapeBuilder::getGtfsBox(
           &gtfs[0], usedMots, cfg.shapeTripId, cfg.dropShapes, &box,
           motCfg.osmBuildOpts.maxSpeed, &hopDists, cfg.verbosity);
+
+    pfaedle::router::TripCacheOptions tripCacheOpts;
+    tripCacheOpts.enabled = cfg.tripCache.enabled;
+    tripCacheOpts.baseDir = cfg.tripCache.directory;
+    tripCacheOpts.maxBytes = cfg.tripCache.maxBytes;
+    unsigned deterministicSeed = 0u;
+    if (tripCacheOpts.enabled) {
+    tripCacheOpts.paramsHash =
+      pfaedle::router::TripCache::computeParamsFingerprint(
+        cfg, motCfg, cfgPaths);
+    tripCacheOpts.graphHash =
+      pfaedle::router::TripCache::computeGraphFingerprint(
+        cfg, motCfg, cfgPaths, tripCacheOpts.paramsHash);
+    deterministicSeed = pfaedle::router::TripCache::deriveDeterministicSeed(
+      tripCacheOpts.graphHash, tripCacheOpts.paramsHash);
+    srand(deterministicSeed);
+    LOG(DEBUG) << "Trip cache deterministic RNG seed "
+           << deterministicSeed;
+    } else {
+    deterministicSeed = static_cast<unsigned>(time(nullptr));
+    srand(deterministicSeed);
+    }
 
       T_START(osmBuild);
 
@@ -353,6 +375,8 @@ int main(int argc, char** argv) {
       for (const auto& nd : graph.getNds()) {
         graphDimensions[filePost].second += nd->getAdjListOut().size();
       }
+
+      pfaedle::router::TripCache tripCache(tripCacheOpts, &graph);
 
       StatsimiClassifier* statsimiClassifier;
 
@@ -395,8 +419,9 @@ int main(int argc, char** argv) {
         exit(1);
       }
 
-      ShapeBuilder shapeBuilder(&gtfs[0], usedMots, motCfg, &graph, &fStops,
-                                &restr, statsimiClassifier, router, cfg);
+  ShapeBuilder shapeBuilder(&gtfs[0], usedMots, motCfg, &graph, &fStops,
+            &restr, statsimiClassifier, router,
+            &tripCache, cfg);
 
       pfaedle::netgraph::Graph ng;
 
@@ -416,6 +441,29 @@ int main(int argc, char** argv) {
         pstr.close();
       } else {
         stats += shapeBuilder.shapeify(&ng);
+      }
+
+      if (tripCache.enabled()) {
+        const auto cacheStats = tripCache.stats();
+        totalTripCacheStats.hits += cacheStats.hits;
+        totalTripCacheStats.misses += cacheStats.misses;
+        totalTripCacheStats.stores += cacheStats.stores;
+        totalTripCacheStats.storeSkipped += cacheStats.storeSkipped;
+        totalTripCacheStats.errors += cacheStats.errors;
+        totalTripCacheStats.evictions += cacheStats.evictions;
+        totalTripCacheStats.bytesRead += cacheStats.bytesRead;
+        totalTripCacheStats.bytesWritten += cacheStats.bytesWritten;
+        anyTripCacheEnabled = true;
+
+        LOG(INFO) << "Trip cache stats (" << motStr << "): "
+                  << cacheStats.hits << " hits, " << cacheStats.misses
+                  << " misses, " << cacheStats.stores << " stores, "
+                  << cacheStats.storeSkipped << " skipped, "
+                  << cacheStats.evictions << " evictions, "
+                  << cacheStats.errors << " errors, "
+                  << util::readableSize(cacheStats.bytesRead) << " read, "
+                  << util::readableSize(cacheStats.bytesWritten)
+                  << " written.";
       }
 
       if (router) delete router;
@@ -486,6 +534,36 @@ int main(int argc, char** argv) {
              {"peak-memory", util::readableSize(util::getPeakRSS())},
              {"peak-memory-bytes", util::getPeakRSS()}}}};
 
+  if (anyTripCacheEnabled) {
+    util::json::Dict cacheJson;
+    cacheJson["hits"] = static_cast<double>(totalTripCacheStats.hits);
+    cacheJson["misses"] = static_cast<double>(totalTripCacheStats.misses);
+    cacheJson["stores"] = static_cast<double>(totalTripCacheStats.stores);
+    cacheJson["stores_skipped"] =
+        static_cast<double>(totalTripCacheStats.storeSkipped);
+    cacheJson["evictions"] =
+        static_cast<double>(totalTripCacheStats.evictions);
+    cacheJson["errors"] = static_cast<double>(totalTripCacheStats.errors);
+    cacheJson["bytes_read"] =
+        static_cast<double>(totalTripCacheStats.bytesRead);
+    cacheJson["bytes_written"] =
+        static_cast<double>(totalTripCacheStats.bytesWritten);
+    cacheJson["bytes_read_human"] =
+        util::readableSize(totalTripCacheStats.bytesRead);
+    cacheJson["bytes_written_human"] =
+        util::readableSize(totalTripCacheStats.bytesWritten);
+
+    auto statsIt = jsonStats.find("statistics");
+    if (statsIt == jsonStats.end()) {
+      statsIt =
+          jsonStats.emplace("statistics", util::json::Dict{}).first;
+    }
+    if (statsIt->second.type != util::json::Val::DICT) {
+      statsIt->second = util::json::Dict{};
+    }
+    statsIt->second.dict["trip_cache"] = cacheJson;
+  }
+
     std::ofstream ofs;
     ofs.open(cfg.dbgOutputPath + "/stats.json");
     util::json::Writer wr(&ofs, 10, true);
@@ -524,6 +602,19 @@ int main(int argc, char** argv) {
     build["git_sha"] = std::string(VERSION_FULL);
     build["pfaedle_version"] = std::string(VERSION_FULL);
     report["build"] = build;
+
+    if (anyTripCacheEnabled) {
+      util::json::Dict cache;
+      cache["hits"] = static_cast<double>(totalTripCacheStats.hits);
+      cache["misses"] = static_cast<double>(totalTripCacheStats.misses);
+      cache["stores"] = static_cast<double>(totalTripCacheStats.stores);
+      cache["stores_skipped"] = static_cast<double>(totalTripCacheStats.storeSkipped);
+      cache["evictions"] = static_cast<double>(totalTripCacheStats.evictions);
+      cache["errors"] = static_cast<double>(totalTripCacheStats.errors);
+      cache["bytes_read"] = static_cast<double>(totalTripCacheStats.bytesRead);
+      cache["bytes_written"] = static_cast<double>(totalTripCacheStats.bytesWritten);
+      report["cache"] = cache;
+    }
 
     std::ofstream ofs(cfg.metricsOut);
     if (!ofs.good()) {
