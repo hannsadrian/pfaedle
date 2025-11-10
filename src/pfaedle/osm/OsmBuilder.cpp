@@ -507,7 +507,6 @@ void OsmBuilder::readBBoxNds(OsmSource* source, OsmIdSet* nodes,
   const OsmSourceNode* nd;
 
   while ((nd = source->nextNode())) {
-    std::cout << " GOT NODE " << nd->id << std::endl;
     if (bbox.contains(Point<double>(nd->lon, nd->lat))) {
       nodes->add(nd->id);
     } else {
@@ -604,7 +603,19 @@ OsmWay OsmBuilder::nextWay(OsmSource* source, const RelMap& wayRels,
     OsmSourceAttr attr;
 
     while ((attr = source->nextAttr()).key) {
-      if (keepAttrs.count(attr.key)) w.attrs[attr.key] = attr.value;
+      if (keepAttrs.count(attr.key)) {
+        w.attrs[attr.key] = attr.value;
+        // Debug: Log oneway, access, and construction-related tags only
+        if (std::string(attr.key).find("oneway") != std::string::npos ||
+            std::string(attr.key) == "junction" ||
+            std::string(attr.key) == "access" ||
+            std::string(attr.key) == "construction" ||
+            std::string(attr.key).find("busway") != std::string::npos ||
+            std::string(attr.key).find("psv") != std::string::npos ||
+            std::string(attr.key).find(":bus") != std::string::npos) {
+          LOG(DEBUG) << "Way " << w.id << ": " << attr.key << "=" << attr.value;
+        }
+      }
       source->cont();
     }
 
@@ -695,8 +706,14 @@ void OsmBuilder::readEdges(OsmSource* source, Graph* g, const RelLst& rels,
         e->pl().setLvl(filter.level(w.attrs));
         if (!track.empty()) (*eTracks)[e] = track;
 
-        if (filter.oneway(w.attrs)) e->pl().setOneWay(1);
-        if (filter.onewayrev(w.attrs)) e->pl().setOneWay(2);
+        if (filter.oneway(w.attrs)) {
+          e->pl().setOneWay(1);
+          LOG(DEBUG) << "Way " << w.id << ": Set oneway=1 (forward)";
+        }
+        if (filter.onewayrev(w.attrs)) {
+          e->pl().setOneWay(2);
+          LOG(DEBUG) << "Way " << w.id << ": Set oneway=2 (reverse)";
+        }
       }
       lastnid = nid;
       last = n;

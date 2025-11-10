@@ -149,6 +149,8 @@ std::map<size_t, EdgeListHops> RouterImpl<TW>::route(
 
       if (!found) {
         // write the cost for the NULL candidates as a fallback
+        LOG(VDEBUG) << "No routing path found between layers (trie node " 
+                    << frTrNid << " to " << toTrNid << "), using fallback to null candidates";
         for (size_t frNid = 0; frNid < ecm.at(frTrNid).size(); frNid++) {
           double newC = costsDAG[frTrNid][frNid] + maxCost * 100;
           // in the time expanded case, there might be multiple null cands
@@ -259,10 +261,14 @@ std::map<size_t, EdgeListHops> RouterImpl<TW>::route(
               {edgs, fr.e, to.e, fr.progr, to.progr, {}, {}});
         } else {
           // no path was found, which is marked by an empty edge list
+          LOG(VDEBUG) << "Routing failed: cost=" << c << " maxCost=" << maxCostRtInt 
+                      << " from edge " << fr.e << " to edge " << to.e;
           ret[leafNid].push_back({{}, fr.e, to.e, fr.progr, to.progr, {}, {}});
         }
       } else {
         // fallback to the position given in candidate
+        LOG(VDEBUG) << "Using placeholder candidates: fr.e=" << (fr.e ? "valid" : "null") 
+                    << " to.e=" << (to.e ? "valid" : "null");
         if (fr.e) {
           ret[leafNid].push_back({edgs, fr.e, 0, fr.progr, 0, {}, to.point});
         } else if (to.e) {

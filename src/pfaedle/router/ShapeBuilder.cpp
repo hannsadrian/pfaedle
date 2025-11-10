@@ -166,6 +166,9 @@ EdgeCandGroup ShapeBuilder::getEdgCands(const Stop* s) const {
   // when no candidate yielded a feasible route
   auto pos = POINT(s->getLng(), s->getLat());
   ret.push_back({0, 0, 0, pos, 0, {}});
+  
+  LOG(VDEBUG) << "Getting edge candidates for stop '" << s->getName() 
+              << "' at (" << s->getLat() << ", " << s->getLng() << ")";
 
   double maxMDist = _motCfg.osmBuildOpts.maxStationCandDistance;
 

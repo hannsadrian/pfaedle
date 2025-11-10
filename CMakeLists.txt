@@ -1,5 +1,6 @@
 cmake_minimum_required (VERSION 3.5)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project (pfaedle)
 
@@ -15,13 +16,20 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 set(EXECUTABLE_OUTPUT_PATH "${CMAKE_BINARY_DIR}")
 
 # set compiler flags, see http://stackoverflow.com/questions/7724569/debug-vs-release-in-cmake
-set(CMAKE_CXX_FLAGS                "-Ofast -fno-signed-zeros -fno-trapping-math -Wall -Wno-format-extra-args -Wextra -Wformat-nonliteral -Wformat-security -Wformat=2 -Wextra -Wno-implicit-fallthrough -pedantic -Wno-keyword-macro")
-set(CMAKE_CXX_FLAGS_SANITIZE       "-Og -g -fsanitize=address -fsanitize=leak -fsanitize=undefined -DLOGLEVEL=3 -DPFAEDLE_DBG=1")
-set(CMAKE_CXX_FLAGS_PROFILE        "-g -pg -DLOGLEVEL=3 -DPFAEDLE_DBG=1")
-set(CMAKE_CXX_FLAGS_DEBUG          "-Og -g -DLOGLEVEL=3 -DPFAEDLE_DBG=1")
+# NOTE: We use selective fast-math flags instead of -Ofast/-ffast-math to preserve infinity() while keeping speed
+# -fno-math-errno: Don't set errno on math functions (big speedup)
+# -fno-trapping-math: Assume FP operations don't generate traps
+# -fno-signed-zeros: Treat +0 and -0 as equal
+# -fassociative-math: Allow re-association of operands in FP expressions
+# -freciprocal-math: Allow x/y to be optimized as x * (1/y)
+# We explicitly DO NOT use -ffinite-math-only as it breaks infinity()
+set(CMAKE_CXX_FLAGS                "-O3 -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math -freciprocal-math -Wall -Wno-format-extra-args -Wextra -Wformat-nonliteral -Wformat-security -Wformat=2 -Wextra -Wno-implicit-fallthrough -pedantic -Wno-keyword-macro")
+set(CMAKE_CXX_FLAGS_SANITIZE       "-Og -g -fsanitize=address -fsanitize=leak -fsanitize=undefined -DLOGLEVEL=4 -DPFAEDLE_DBG=1")
+set(CMAKE_CXX_FLAGS_PROFILE        "-g -pg -DLOGLEVEL=4 -DPFAEDLE_DBG=1")
+set(CMAKE_CXX_FLAGS_DEBUG          "-Og -g -DLOGLEVEL=4 -DPFAEDLE_DBG=1")
 set(CMAKE_CXX_FLAGS_MINSIZEREL     "${CMAKE_CXX_FLAGS} -DLOGLEVEL=2")
 set(CMAKE_CXX_FLAGS_RELEASE        "${CMAKE_CXX_FLAGS} -DLOGLEVEL=2")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS} -g -DLOGLEVEL=3")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS} -g -DLOGLEVEL=4")
 
 # export compile commands to tools like clang
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -31,6 +39,21 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPFAEDLE_PRECISION=${PFAEDLE_PRECISION}
 find_package(LibZip)
 find_package(ZLIB)
 find_package(BZip2)
+
+# Find libosmium (header-only library)
+find_path(OSMIUM_INCLUDE_DIR osmium/version.hpp
+    PATHS
+    /usr/local/include
+    /opt/homebrew/include
+    /usr/include
+)
+
+if (OSMIUM_INCLUDE_DIR)
+    message(STATUS "Found libosmium: ${OSMIUM_INCLUDE_DIR}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DOSMIUM_FOUND=1")
+else()
+    message(FATAL_ERROR "libosmium not found. Install with: brew install libosmium")
+endif()
 
 if (LIBZIP_FOUND)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLIBZIP_FOUND=1")
