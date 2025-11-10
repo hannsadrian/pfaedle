@@ -6,6 +6,7 @@
 #include <set>
 #include <string>
 #include <utility>
+
 #include "ad/cppgtfs/gtfs/Feed.h"
 #include "pfaedle/Def.h"
 #include "shapevl/Collector.h"
@@ -22,10 +23,15 @@ using ad::cppgtfs::gtfs::Trip;
 using pfaedle::eval::Collector;
 using pfaedle::eval::Result;
 using util::geo::output::GeoJsonOutput;
+using util::WARN;
+using util::INFO;
+using util::ERROR;
+using util::DEBUG;
+using util::VDEBUG;
 
 // _____________________________________________________________________________
-double Collector::add(const Trip* oldT, const Shape* oldS, const Trip* newT,
-                      const Shape* newS) {
+double Collector::add(const Trip* oldT, const Shape* oldS, size_t numOldTrips,
+                      const Trip* newT, const Shape* newS, double segLen) {
   // This adds a new trip with a new shape to our evaluation.
   _trips++;
 
@@ -53,7 +59,10 @@ double Collector::add(const Trip* oldT, const Shape* oldS, const Trip* newT,
     }
   }
 
+  double accFd = 0;
   double fd = 0;
+  double d = 0;
+  double lenDiff = 0;
 
   // A "segment" is a path from station s_i to station s_{i+1}
 
@@ -102,9 +111,6 @@ double Collector::add(const Trip* oldT, const Shape* oldS, const Trip* newT,
     newLCut.insert(newLCut.end(), newL.begin(), newL.end());
   }
 
-  // convert (roughly) to degrees
-  double SEGL = 25.0 / util::geo::M_PER_DEG;
-
   double f = util::geo::webMercDistFactor(oldLCut.front());
 
   // roughly half a meter
@@ -113,21 +119,63 @@ double Collector::add(const Trip* oldT, const Shape* oldS, const Trip* newT,
   auto newLCutS =
       util::geo::simplify(newLCut, f * (0.5 / util::geo::M_PER_DEG));
 
-  auto old = _dCache.find(oldLCutS);
-  if (old != _dCache.end()) {
+  auto old = _accFdCache.find(oldLCutS);
+  if (old != _accFdCache.end()) {
+    auto match = old->second.find(newLCutS);
+    if (match != old->second.end()) {
+      accFd = match->second;
+    } else {
+      accFd = util::geo::accFrechetDistCHav(oldLCutS, newLCutS, segLen);
+      _accFdCache[oldLCutS][newLCutS] = accFd;
+    }
+  } else {
+    accFd = util::geo::accFrechetDistCHav(oldLCutS, newLCutS, segLen);
+    _accFdCache[oldLCutS][newLCutS] = accFd;
+  }
+
+  old = _fdCache.find(oldLCutS);
+  if (old != _fdCache.end()) {
     auto match = old->second.find(newLCutS);
     if (match != old->second.end()) {
       fd = match->second;
     } else {
-      fd = util::geo::accFrechetDistCHav(oldLCutS, newLCutS, SEGL);
-      _dCache[oldLCutS][newLCutS] = fd;
+      fd = util::geo::frechetDistHav(oldLCutS, newLCutS, segLen);
+      _fdCache[oldLCutS][newLCutS] = fd;
     }
   } else {
-    fd = util::geo::accFrechetDistCHav(oldLCutS, newLCutS, SEGL);
-    _dCache[oldLCutS][newLCutS] = fd;
+    fd = util::geo::frechetDistHav(oldLCutS, newLCutS, segLen);
+    _fdCache[oldLCutS][newLCutS] = fd;
   }
 
-  auto dA = getDa(oldSegs, newSegs);
+  old = _dCache.find(oldLCutS);
+  if (old != _dCache.end()) {
+    auto match = old->second.find(newLCutS);
+    if (match != old->second.end()) {
+      d = match->second;
+    } else {
+      d = util::geo::dist(oldLCutS, newLCutS);
+      _dCache[oldLCutS][newLCutS] = d;
+    }
+  } else {
+    d = util::geo::dist(oldLCutS, newLCutS);
+    _dCache[oldLCutS][newLCutS] = d;
+  }
+
+  old = _lenDiffCache.find(oldLCutS);
+  if (old != _lenDiffCache.end()) {
+    auto match = old->second.find(newLCutS);
+    if (match != old->second.end()) {
+      lenDiff = match->second;
+    } else {
+      lenDiff = util::geo::latLngLen(oldLCutS) - util::geo::latLngLen(newLCutS);
+      _lenDiffCache[oldLCutS][newLCutS] = lenDiff;
+    }
+  } else {
+    lenDiff = util::geo::latLngLen(oldLCutS) - util::geo::latLngLen(newLCutS);
+    _lenDiffCache[oldLCutS][newLCutS] = lenDiff;
+  }
+
+  auto dA = getDa(oldSegs, newSegs, segLen);
   unmatchedSegments = dA.first;
   unmatchedSegmentsLength = dA.second;
 
@@ -141,11 +189,11 @@ double Collector::add(const Trip* oldT, const Shape* oldS, const Trip* newT,
     return 0;
   }
 
-  _fdSum += fd / totL;
+  _accFdSum += accFd / totL;
   _unmatchedSegSum += unmatchedSegments;
   _unmatchedSegLengthSum += unmatchedSegmentsLength;
 
-  double avgFd = fd / totL;
+  double avgFd = accFd / totL;
   double AN = static_cast<double>(unmatchedSegments) /
               static_cast<double>(oldSegs.size());
   double AL = unmatchedSegmentsLength / totL;
@@ -167,17 +215,43 @@ double Collector::add(const Trip* oldT, const Shape* oldS, const Trip* newT,
               << totL << " = " << AL << " d_f = " << avgFd;
 
   if (_reportOut) {
-    (*_reportOut) << std::fixed << std::setprecision(6);
-    (*_reportOut) << oldT->getId() << "\t" << AN << "\t" << AL << "\t" << avgFd
-                  << "\t" << util::geo::getWKT(oldSegs) << "\t"
-                  << util::geo::getWKT(newSegs) << "\t" << oldT->getRoute()->getShortName() << "\t";
+    if (_reportLevel == 0) {
+      (*_reportOut) << std::fixed << std::setprecision(6);
+      (*_reportOut) << oldT->getId() << "\t" << AN << "\t" << AL << "\t"
+                    << avgFd << "\t" << oldT->getRoute()->getShortName()
+                    << "\t";
+    } else if (_reportLevel == 1) {
+      (*_reportOut) << std::fixed << std::setprecision(6);
+      (*_reportOut) << oldT->getId() << "\t" << AN << "\t" << AL << "\t"
+                    << avgFd << "\t" << util::geo::getWKT(oldSegs) << "\t"
+                    << util::geo::getWKT(newSegs) << "\t"
+                    << oldT->getRoute()->getShortName() << "\t";
 
-    for (const auto& st : oldT->getStopTimes()) {
-      (*_reportOut) << st.getStop()->getName() << "\t"
-                    << st.getStop()->getLat() << "\t"
-                    << st.getStop()->getLng() << "\t";
+      for (const auto& st : oldT->getStopTimes()) {
+        (*_reportOut) << st.getStop()->getName() << "\t"
+                      << st.getStop()->getLat() << "\t"
+                      << st.getStop()->getLng() << "\t";
+      }
+    } else if (_reportLevel == 2) {
+      (*_reportOut) << std::fixed << std::setprecision(6);
+      (*_reportOut) << oldT->getId() << "\t" << AN << "\t" << AL << "\t"
+                    << avgFd << "\t" << fd << "\t" << d << "\t" << lenDiff
+                    << "\t" << util::geo::getWKT(oldSegs) << "\t"
+                    << util::geo::getWKT(newSegs) << "\t"
+                    << oldT->getRoute()->getShortName() << "\t" << numOldTrips
+                    << "\t"
+                    << ad::cppgtfs::gtfs::flat::Route::getTypeString(
+                           ad::cppgtfs::gtfs::flat::Route::getStandardRouteType(
+                               oldT->getRoute()->getType()))
+                    << "\t";
+
+      for (const auto& st : oldT->getStopTimes()) {
+        (*_reportOut) << st.getStop()->getName() << "\t"
+                      << st.getStop()->getLat() << "\t"
+                      << st.getStop()->getLng() << "\t";
+      }
     }
-(*_reportOut) << "\n";
+    (*_reportOut) << "\n";
   }
 
   return avgFd;
@@ -198,9 +272,8 @@ std::vector<LINE> Collector::segmentize(
     cuts.push_back(st.getShapeDistanceTravelled());
   }
 
-
-  size_t to = std::upper_bound(dists.begin(), dists.end(), cuts[0]) -
-                  dists.begin();
+  size_t to =
+      std::upper_bound(dists.begin(), dists.end(), cuts[0]) - dists.begin();
 
   POINT lastP;
   if (to >= dists.size()) {
@@ -210,13 +283,15 @@ std::vector<LINE> Collector::segmentize(
   } else {
     double progr = (cuts[0] - dists[to - 1]) / (dists[to] - dists[to - 1]);
     lastP = shape[to - 1];
-    lastP.setX(lastP.getX() + progr * (shape[to].getX() - shape[to-1].getX()));
-    lastP.setY(lastP.getY() + progr * (shape[to].getY() - shape[to-1].getY()));
+    lastP.setX(lastP.getX() +
+               progr * (shape[to].getX() - shape[to - 1].getX()));
+    lastP.setY(lastP.getY() +
+               progr * (shape[to].getY() - shape[to - 1].getY()));
   }
 
   for (size_t i = 1; i < cuts.size(); i++) {
-    size_t to = std::upper_bound(dists.begin(), dists.end(), cuts[i]) -
-                    dists.begin();
+    size_t to =
+        std::upper_bound(dists.begin(), dists.end(), cuts[i]) - dists.begin();
 
     POINT curP;
     if (to >= dists.size()) {
@@ -226,8 +301,10 @@ std::vector<LINE> Collector::segmentize(
     } else {
       curP = shape[to - 1];
       double progr = (cuts[i] - dists[to - 1]) / (dists[to] - dists[to - 1]);
-      curP.setX(curP.getX() + progr * (shape[to].getX() - shape[to-1].getX()));
-      curP.setY(curP.getY() + progr * (shape[to].getY() - shape[to-1].getY()));
+      curP.setX(curP.getX() +
+                progr * (shape[to].getX() - shape[to - 1].getX()));
+      curP.setY(curP.getY() +
+                progr * (shape[to].getY() - shape[to - 1].getY()));
     }
 
     auto curL = pl.getSegment(lastP, curP).getLine();
@@ -262,7 +339,7 @@ LINE Collector::getLine(const Shape* s, std::vector<double>* dists) {
 const std::set<Result>& Collector::getResults() const { return _results; }
 
 // _____________________________________________________________________________
-double Collector::getAvgDist() const { return _fdSum / _results.size(); }
+double Collector::getAvgDist() const { return _accFdSum / _results.size(); }
 
 // _____________________________________________________________________________
 void Collector::printCsv(std::ostream* os,
@@ -441,12 +518,10 @@ std::map<string, double> Collector::getStats() {
 
 // _____________________________________________________________________________
 std::pair<size_t, double> Collector::getDa(const std::vector<LINE>& a,
-                                           const std::vector<LINE>& b) {
+                                           const std::vector<LINE>& b,
+                                           double segLen) {
   assert(a.size() == b.size());
   std::pair<size_t, double> ret{0, 0};
-
-  // convert (roughly) to degrees
-  double SEGL = 25 / util::geo::M_PER_DEG;
 
   double MAX = 100;
 
@@ -465,11 +540,11 @@ std::pair<size_t, double> Collector::getDa(const std::vector<LINE>& a,
       if (match != old->second.end()) {
         fdMeter = match->second;
       } else {
-        fdMeter = util::geo::frechetDistHav(aSimpl, bSimpl, SEGL);
+        fdMeter = util::geo::frechetDistHav(aSimpl, bSimpl, segLen);
         _dACache[aSimpl][bSimpl] = fdMeter;
       }
     } else {
-      fdMeter = util::geo::frechetDistHav(aSimpl, bSimpl, SEGL);
+      fdMeter = util::geo::frechetDistHav(aSimpl, bSimpl, segLen);
       _dACache[aSimpl][bSimpl] = fdMeter;
     }
 

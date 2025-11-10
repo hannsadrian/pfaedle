@@ -47,10 +47,10 @@ struct lineCmp {
  */
 class Collector {
  public:
-  Collector(std::ostream* reportOut)
+  Collector(std::ostream* reportOut, int reportLevel)
       : _trips(0),
         _noOrigShp(0),
-        _fdSum(0),
+        _accFdSum(0),
         _unmatchedSegSum(0),
         _unmatchedSegLengthSum(0),
         _an0(0),
@@ -60,12 +60,12 @@ class Collector {
         _an50(0),
         _an70(0),
         _an90(0),
-        _reportOut(reportOut) {}
+        _reportOut(reportOut), _reportLevel(reportLevel) {}
 
   // Add a shape found by our tool newS for a trip t with newly calculated
   // station dist values with the old shape oldS
-  double add(const Trip* oldT, const Shape* oldS, const Trip* newT,
-             const Shape* newS);
+  double add(const Trip* oldT, const Shape* oldS, size_t numOldTrips,
+             const Trip* newT, const Shape* newS, double segLen);
 
   // Return the set of all Result objects
   const std::set<Result>& getResults() const;
@@ -91,8 +91,11 @@ class Collector {
 
  private:
   std::set<Result> _results;
-  std::map<LINE, std::map<LINE, double, lineCmp>, lineCmp> _dCache;
+  std::map<LINE, std::map<LINE, double, lineCmp>, lineCmp> _accFdCache;
   std::map<LINE, std::map<LINE, double, lineCmp>, lineCmp> _dACache;
+  std::map<LINE, std::map<LINE, double, lineCmp>, lineCmp> _fdCache;
+  std::map<LINE, std::map<LINE, double, lineCmp>, lineCmp> _dCache;
+  std::map<LINE, std::map<LINE, double, lineCmp>, lineCmp> _lenDiffCache;
 
   size_t _trips;
   size_t _noOrigShp;
@@ -100,23 +103,24 @@ class Collector {
   std::vector<double> _distDiffs;
   std::vector<double> _hopDists;
 
-  double _fdSum;
+  double _accFdSum;
   size_t _unmatchedSegSum;
   double _unmatchedSegLengthSum;
 
-  size_t _an0;
-  size_t _an5;
-  size_t _an10;
-  size_t _an20;
-  size_t _an30;
-  size_t _an50;
-  size_t _an70;
-  size_t _an90;
+  size_t _an0 = 0;
+  size_t _an5 = 0;
+  size_t _an10 = 0;
+  size_t _an20 = 0;
+  size_t _an30 = 0;
+  size_t _an50 = 0;
+  size_t _an70 = 0;
+  size_t _an90 = 0;
 
   std::ostream* _reportOut;
+  int _reportLevel = 1;
 
   std::pair<size_t, double> getDa(const std::vector<LINE>& a,
-                                  const std::vector<LINE>& b);
+                                  const std::vector<LINE>& b, double segLen);
 
   static std::vector<LINE> segmentize(
       const Trip* t, const LINE& shape, const std::vector<double>& dists,

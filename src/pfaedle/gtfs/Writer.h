@@ -40,7 +40,8 @@ class Writer {
   void writeStopTimes(Feed* f, std::ostream* os) const;
   void writeLevels(Feed* f, std::ostream* os) const;
   void writePathways(Feed* f, std::ostream* os) const;
-  void writeAttribution(Feed* f, std::ostream* os) const;
+  void writeAttributions(Feed* f, std::ostream* os) const;
+  void writeTranslations(Feed* f, std::ostream* os) const;
 
   static void cannotWrite(const std::string& file, const std::string& file2);
   static void cannotWrite(const std::string& file);
