@@ -20,6 +20,7 @@
 #include "pfaedle/osm/OsmReadOpts.h"
 #include "pfaedle/osm/Restrictor.h"
 #include "pfaedle/osm/source/XMLSource.h"
+#include "pfaedle/osm/source/PBFSource.h"
 #include "pfaedle/router/Router.h"
 #include "pfaedle/trgraph/Graph.h"
 #include "pfaedle/trgraph/Normalizer.h"
@@ -148,6 +149,27 @@ class OsmBuilder {
                  const OsmFilter& filter, const OsmIdSet& bBoxNodes,
                  const AttrKeySet& keepAttrs, OsmIdList* ret, NIdMap* nodes,
                  const FlatRels& flatRels);
+  
+  // Optimized functions using location index for PBF files
+  void readEdgesWithLocationIndex(source::PBFSource* source, Graph* g,
+                                  const RelLst& rels, const RelMap& wayRels,
+                                  const OsmFilter& filter, const BBoxIdx& bbox,
+                                  NIdMap* nodes, NIdMultMap* multNodes,
+                                  const OsmIdSet& noHupNodes,
+                                  const AttrKeySet& keepAttrs,
+                                  const Restrictions& rest, Restrictor* restor,
+                                  const FlatRels& flatRels, EdgTracks* etracks,
+                                  const OsmReadOpts& opts);
+  
+  void readOrphanStationsWithLocationIndex(source::PBFSource* source, Graph* g,
+                                          NodeSet* orphanStations,
+                                          const RelLst& rels,
+                                          const RelMap& nodeRels,
+                                          const OsmFilter& filter,
+                                          const BBoxIdx& bbox,
+                                          const AttrKeySet& keepAttrs,
+                                          const FlatRels& flatRels,
+                                          const OsmReadOpts& opts) const;
 
   OsmWay nextWay(source::OsmSource* source, const RelMap& wayRels,
                  const OsmFilter& filter, const OsmIdSet& bBoxNodes,

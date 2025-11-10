@@ -14,8 +14,12 @@
 #include <osmium/osm/way.hpp>
 #include <osmium/osm/relation.hpp>
 #include <osmium/memory/buffer.hpp>
+#include <osmium/index/map/sparse_mem_array.hpp>
+#include <osmium/handler.hpp>
+#include <osmium/visitor.hpp>
 
 #include "pfaedle/osm/source/OsmSource.h"
+#include "pfaedle/osm/Osm.h"
 #include "util/geo/Geo.h"
 
 namespace pfaedle {
@@ -24,6 +28,8 @@ namespace source {
 
 class PBFSource : public OsmSource {
  public:
+  using LocationIndex = osmium::index::map::SparseMemArray<osmium::unsigned_object_id_type, osmium::Location>;
+  
   PBFSource(const std::string& path);
   virtual ~PBFSource();
   
@@ -43,6 +49,15 @@ class PBFSource : public OsmSource {
 
   virtual std::string decode(const char* str) const;
   virtual std::string decode(const std::string& str) const;
+  
+  // Build location index for nodes in the given bounding box
+  void buildLocationIndex(const util::geo::Box<double>& bbox);
+  
+  // Check if a node location is available in the index
+  bool hasNodeLocation(osmid id) const;
+  
+  // Get node location from the index
+  bool getNodeLocation(osmid id, double* lat, double* lon) const;
 
  private:
   std::string _path;
@@ -68,6 +83,9 @@ class PBFSource : public OsmSource {
   OsmSourceAttr _retAttr;
   
   util::geo::Box<double> _bbox;
+  
+  // Location index for fast node coordinate lookup
+  std::unique_ptr<LocationIndex> _locationIndex;
   
   void readNextBuffer();
   void advanceToNextEntity(osmium::item_type type);

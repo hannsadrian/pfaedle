@@ -7,6 +7,9 @@
 #include <cassert>
 #include <fstream>
 
+#include <osmium/handler.hpp>
+#include <osmium/visitor.hpp>
+
 #include "pfaedle/osm/source/PBFSource.h"
 #include "util/log/Log.h"
 
@@ -117,10 +120,7 @@ const OsmSourceNode* PBFSource::nextNode() {
 
 // _____________________________________________________________________________
 const OsmSourceAttr PBFSource::nextAttr() {
-  const osmium::TagList* tags = nullptr;
-  
   if (_curNode) {
-    tags = &_curNode->tags();
     if (_curTagIt != _curTagEnd) {
       _retAttr.key = _curTagIt->key();
       _retAttr.value = _curTagIt->value();
@@ -128,7 +128,6 @@ const OsmSourceAttr PBFSource::nextAttr() {
       return _retAttr;
     }
   } else if (_curWay) {
-    tags = &_curWay->tags();
     if (_curTagIt != _curTagEnd) {
       _retAttr.key = _curTagIt->key();
       _retAttr.value = _curTagIt->value();
@@ -136,7 +135,6 @@ const OsmSourceAttr PBFSource::nextAttr() {
       return _retAttr;
     }
   } else if (_curRel) {
-    tags = &_curRel->tags();
     if (_curTagIt != _curTagEnd) {
       _retAttr.key = _curTagIt->key();
       _retAttr.value = _curTagIt->value();
@@ -292,4 +290,77 @@ std::string PBFSource::decode(const char* str) const {
 // _____________________________________________________________________________
 std::string PBFSource::decode(const std::string& str) const {
   return str;
+}
+
+// _____________________________________________________________________________
+// Handler for building the location index
+class LocationIndexHandler : public osmium::handler::Handler {
+ public:
+  LocationIndexHandler(PBFSource::LocationIndex& index, 
+                      const util::geo::Box<double>& bbox)
+      : _index(index), _bbox(bbox), _nodeCount(0) {}
+
+  void node(const osmium::Node& node) {
+    util::geo::Point<double> pt(node.location().lon(), node.location().lat());
+    if (util::geo::contains(pt, _bbox)) {
+      _index.set(node.positive_id(), node.location());
+      _nodeCount++;
+    }
+  }
+  
+  size_t nodeCount() const { return _nodeCount; }
+
+ private:
+  PBFSource::LocationIndex& _index;
+  util::geo::Box<double> _bbox;
+  size_t _nodeCount;
+};
+
+// _____________________________________________________________________________
+void PBFSource::buildLocationIndex(const util::geo::Box<double>& bbox) {
+  LOG(util::INFO) << "Building location index for bounding box...";
+  
+  // Create the location index
+  _locationIndex = std::make_unique<LocationIndex>();
+  
+  // Create a new reader for building the index
+  osmium::io::File input_file{_path};
+  osmium::io::Reader reader{input_file, osmium::osm_entity_bits::node};
+  
+  // Build the index
+  LocationIndexHandler handler(*_locationIndex, bbox);
+  osmium::apply(reader, handler);
+  reader.close();
+  
+  LOG(util::INFO) << "Location index built with " << handler.nodeCount() << " nodes";
+}
+
+// _____________________________________________________________________________
+bool PBFSource::hasNodeLocation(osmid id) const {
+  if (!_locationIndex) return false;
+  
+  try {
+    osmium::Location loc = _locationIndex->get(id);
+    return loc.valid();
+  } catch (const osmium::not_found&) {
+    return false;
+  }
+}
+
+// _____________________________________________________________________________
+bool PBFSource::getNodeLocation(osmid id, double* lat, double* lon) const {
+  if (!_locationIndex) return false;
+  
+  try {
+    osmium::Location loc = _locationIndex->get(id);
+    if (loc.valid()) {
+      *lat = loc.lat();
+      *lon = loc.lon();
+      return true;
+    }
+  } catch (const osmium::not_found&) {
+    return false;
+  }
+  
+  return false;
 }

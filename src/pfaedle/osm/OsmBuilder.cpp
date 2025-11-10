@@ -95,42 +95,70 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
 
     OsmFilter filter(opts);
     OsmSource* source;
+    PBFSource* pbfSource = nullptr;
 
     if (util::endsWith(path, ".pbf")) {
-      source = new PBFSource(path);
+      pbfSource = new PBFSource(path);
+      source = pbfSource;
     } else {
       source = new XMLSource(path);
     }
 
-    // we do four passes of the file here to be as memory creedy as possible:
-    // - the first pass collects all node IDs which are
-    //    * inside the given bounding box
-    //    * (TODO: maybe more filtering?)
-    //   these nodes are stored on the HD via OsmIdSet (which implements a
-    //   simple bloom filter / base 256 encoded id store
-    // - the second pass collects filtered relations
-    // - the third pass collects filtered ways which contain one of the nodes
-    //   from pass 1
-    // - the forth pass collects filtered nodes which were
-    //    * collected as node ids in pass 1
-    //    * match the filter criteria
-    //    * have been used in a way in pass 3
+    // For PBF files, we can use an optimized 2-pass approach with location index
+    // For other formats, fall back to the 4-pass approach
+    if (pbfSource) {
+      LOG(DEBUG) << "Using optimized 2-pass PBF reading with location index...";
+      
+      // Pass 1: Build location index for bbox nodes and read relations
+      LOG(DEBUG) << "Pass 1: Building location index and reading relations...";
+      pbfSource->buildLocationIndex(bbox.getFullBox());
+      readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
+               &rawRests);
+      
+      // Pass 2: Read ways and build edges using location index
+      LOG(DEBUG) << "Pass 2: Reading edges with location index...";
+      readEdgesWithLocationIndex(pbfSource, g, intmRels, wayRels, filter, bbox,
+                                 &nodes, &multNodes, noHupNodes, attrKeys[1],
+                                 rawRests, res, intmRels.flat, &eTracks, opts);
+      
+      // Read orphan stations from location index
+      LOG(DEBUG) << "Reading orphan stations...";
+      readOrphanStationsWithLocationIndex(pbfSource, g, &orphanStations, 
+                                         intmRels, nodeRels, filter, bbox,
+                                         attrKeys[0], intmRels.flat, opts);
+    } else {
+      LOG(DEBUG) << "Using standard 4-pass reading...";
+      
+      // we do four passes of the file here to be as memory creedy as possible:
+      // - the first pass collects all node IDs which are
+      //    * inside the given bounding box
+      //    * (TODO: maybe more filtering?)
+      //   these nodes are stored on the HD via OsmIdSet (which implements a
+      //   simple bloom filter / base 256 encoded id store
+      // - the second pass collects filtered relations
+      // - the third pass collects filtered ways which contain one of the nodes
+      //   from pass 1
+      // - the forth pass collects filtered nodes which were
+      //    * collected as node ids in pass 1
+      //    * match the filter criteria
+      //    * have been used in a way in pass 3
 
-    LOG(DEBUG) << "Reading bounding box nodes...";
-    readBBoxNds(source, &bboxNodes, &noHupNodes, filter, bbox);
+      LOG(DEBUG) << "Reading bounding box nodes...";
+      readBBoxNds(source, &bboxNodes, &noHupNodes, filter, bbox);
 
-    LOG(DEBUG) << "Reading relations...";
-    readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
-             &rawRests);
+      LOG(DEBUG) << "Reading relations...";
+      readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
+               &rawRests);
 
-    LOG(DEBUG) << "Reading edges...";
-    readEdges(source, g, intmRels, wayRels, filter, bboxNodes, &nodes,
-              &multNodes, noHupNodes, attrKeys[1], rawRests, res, intmRels.flat,
-              &eTracks, opts);
+      LOG(DEBUG) << "Reading edges...";
+      readEdges(source, g, intmRels, wayRels, filter, bboxNodes, &nodes,
+                &multNodes, noHupNodes, attrKeys[1], rawRests, res, intmRels.flat,
+                &eTracks, opts);
 
-    LOG(DEBUG) << "Reading kept nodes...";
-    readNodes(source, g, intmRels, nodeRels, filter, bboxNodes, &nodes,
-              &multNodes, &orphanStations, attrKeys[0], intmRels.flat, opts);
+      LOG(DEBUG) << "Reading kept nodes...";
+      readNodes(source, g, intmRels, nodeRels, filter, bboxNodes, &nodes,
+                &multNodes, &orphanStations, attrKeys[0], intmRels.flat, opts);
+    }
 
     delete source;
   }
@@ -750,6 +778,149 @@ void OsmBuilder::processRestr(osmid nid, osmid wid,
       } else if (kv.eTo == wid) {
         e->pl().setRestricted();
         restor->relax(wid, n, e);
+      }
+    }
+  }
+}
+
+// _____________________________________________________________________________
+void OsmBuilder::readEdgesWithLocationIndex(
+    PBFSource* source, Graph* g, const RelLst& rels, const RelMap& wayRels,
+    const OsmFilter& filter, const BBoxIdx& bbox, NIdMap* nodes,
+    NIdMultMap* multiNodes, const OsmIdSet& noHupNodes,
+    const AttrKeySet& keepAttrs, const Restrictions& rawRests,
+    Restrictor* restor, const FlatRels& fl, EdgTracks* eTracks,
+    const OsmReadOpts& opts) {
+  source->seekWays();
+
+  OsmWay w;
+  while ((w = nextWay(source, wayRels, filter, OsmIdSet(), keepAttrs, fl)).id) {
+    Node* last = 0;
+    std::vector<TransitEdgeLine*> lines;
+    if (wayRels.count(w.id)) {
+      lines = getLines(wayRels.find(w.id)->second, rels, opts, source);
+    }
+    std::string track =
+        getAttrByFirstMatch(opts.edgePlatformRules, w.id, w.attrs, wayRels,
+                            rels, opts.trackNormzer, source);
+
+    osmid lastnid = 0;
+    bool wayInBbox = false;
+    
+    // Check if any node of this way is in the bounding box
+    for (osmid nid : w.nodes) {
+      double lat, lon;
+      if (source->getNodeLocation(nid, &lat, &lon)) {
+        POINT pos = {lon, lat};
+        if (bbox.contains(pos)) {
+          wayInBbox = true;
+          break;
+        }
+      }
+    }
+    
+    if (!wayInBbox) continue;
+    
+    for (osmid nid : w.nodes) {
+      Node* n = 0;
+      double lat, lon;
+      
+      // Get node location from location index
+      if (!source->getNodeLocation(nid, &lat, &lon)) {
+        // Node not in location index (outside bbox), skip
+        continue;
+      }
+      
+      POINT pos = {lon, lat};
+      if (!bbox.contains(pos)) continue;
+      
+      if (noHupNodes.has(nid)) {
+        n = g->addNd(NodePL(pos));
+        (*multiNodes)[nid].insert(n);
+      } else if (!nodes->count(nid)) {
+        n = g->addNd(NodePL(pos));
+        (*nodes)[nid] = n;
+      } else {
+        n = (*nodes)[nid];
+        // Update geometry if not set yet
+        const POINT* geom = n->pl().getGeom();
+        if (!geom || (geom->getX() == 0 && geom->getY() == 0)) {
+          n->pl().setGeom(pos);
+        }
+      }
+
+      if (last) {
+        auto e = g->addEdg(last, n, EdgePL());
+        if (!e) continue;
+
+        processRestr(nid, w.id, rawRests, e, n, restor);
+        processRestr(lastnid, w.id, rawRests, e, last, restor);
+
+        e->pl().addLines(lines);
+        e->pl().setLvl(filter.level(w.attrs));
+        if (!track.empty()) (*eTracks)[e] = track;
+
+        if (filter.oneway(w.attrs)) {
+          e->pl().setOneWay(1);
+          LOG(DEBUG) << "Way " << w.id << ": Set oneway=1 (forward)";
+        }
+        if (filter.onewayrev(w.attrs)) {
+          e->pl().setOneWay(2);
+          LOG(DEBUG) << "Way " << w.id << ": Set oneway=2 (reverse)";
+        }
+      }
+      lastnid = nid;
+      last = n;
+    }
+  }
+}
+
+// _____________________________________________________________________________
+void OsmBuilder::readOrphanStationsWithLocationIndex(
+    PBFSource* source, Graph* g, NodeSet* orphanStations, const RelLst& rels,
+    const RelMap& nodeRels, const OsmFilter& filter, const BBoxIdx& bbox,
+    const AttrKeySet& keepAttrs, const FlatRels& fl,
+    const OsmReadOpts& opts) const {
+  source->seekNodes();
+
+  const OsmSourceNode* nd;
+  while ((nd = source->nextNode())) {
+    POINT pos = {nd->lon, nd->lat};
+    
+    // Check if node is in bbox
+    if (!bbox.contains(pos)) {
+      source->cont();
+      continue;
+    }
+    
+    // Check if we need to read attributes
+    bool needAttrs = false;
+    if (relKeep(nd->id, nodeRels, fl)) {
+      needAttrs = true;
+    }
+    
+    source->cont();
+    
+    if (!needAttrs) continue;
+    
+    AttrMap attrs;
+    OsmSourceAttr attr;
+    while ((attr = source->nextAttr()).key) {
+      if (keepAttrs.count(attr.key)) {
+        attrs[attr.key] = attr.value;
+      }
+      source->cont();
+    }
+    
+    // Check if this is a station node that should be kept
+    if (filter.station(attrs)) {
+      auto si = getStatInfo(nd->id, attrs, nodeRels, rels, opts, source);
+      if (!si.isNull()) {
+        auto tmp = g->addNd(NodePL(pos));
+        tmp->pl().setSI(si);
+        if (tmp->pl().getSI()) {
+          orphanStations->insert(tmp);
+        }
       }
     }
   }
