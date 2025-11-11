@@ -263,6 +263,7 @@ void Writer::write(gtfs::Feed* sourceFeed, const std::string& path) const {
     curFileTg = gtfsPath + "/shapes.txt";
     fs.open(curFile.c_str());
     if (!fs.good()) cannotWrite(curFile, curFileTg);
+    LOG(util::INFO) << "Writing shapes.txt...";
     writeShapes(sourceFeed, &fs);
     fs.close();
 
@@ -731,16 +732,25 @@ void Writer::writeStopTimes(gtfs::Feed* sourceFeed, std::ostream* os) const {
 
   std::string curTripId;
   Trip* cur = 0;
+  std::map<uint32_t, float> curStopDistances;  // sequence -> shape distance
 
   while (p.nextStopTime(csvp.get(), &st, flds)) {
-    // we may have changed to distance field
+    // we may have changed to a different trip
     if (curTripId != st.trip) {
       cur = sourceFeed->getTrips().get(st.trip);
       curTripId = st.trip;
+      
+      // Pre-build index of sequence -> shape distance for this trip
+      curStopDistances.clear();
+      for (const auto& stN : cur->getStopTimes()) {
+        curStopDistances[stN.getSeq()] = stN.getShapeDistanceTravelled();
+      }
     }
-    for (const auto& stN : cur->getStopTimes()) {
-      if (stN.getSeq() == st.sequence)
-        st.shapeDistTravelled = stN.getShapeDistanceTravelled();
+    
+    // O(log n) lookup instead of O(n) search
+    auto it = curStopDistances.find(st.sequence);
+    if (it != curStopDistances.end()) {
+      st.shapeDistTravelled = it->second;
     }
 
     w.writeStopTime(st, csvw.get());

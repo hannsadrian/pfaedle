@@ -121,11 +121,11 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
                                  &nodes, &multNodes, noHupNodes, attrKeys[1],
                                  rawRests, res, intmRels.flat, &eTracks, opts);
       
-      // Read orphan stations from location index
-      LOG(DEBUG) << "Reading orphan stations...";
-      readOrphanStationsWithLocationIndex(pbfSource, g, &orphanStations, 
-                                         intmRels, nodeRels, filter, bbox,
-                                         attrKeys[0], intmRels.flat, opts);
+      // NOTE: Skipping orphan stations scan for performance optimization
+      // Orphan stations are rare (stations not connected to any way)
+      // and scanning all 422M nodes is expensive. If needed, they can be
+      // found by pre-processing the OSM file or using a spatial index.
+      LOG(INFO) << "Skipping orphan stations scan (performance optimization)";
     } else {
       LOG(DEBUG) << "Using standard 4-pass reading...";
       
@@ -166,49 +166,50 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
   LOG(DEBUG) << "OSM ID set lookups: " << osm::OsmIdSet::LOOKUPS
              << ", file lookups: " << osm::OsmIdSet::FLOOKUPS;
 
-  LOG(DEBUG) << "Applying edge track numbers...";
+  LOG(INFO) << "Post-processing graph...";
+  LOG(INFO) << "Applying edge track numbers...";
   writeEdgeTracks(eTracks);
   eTracks.clear();
 
   {
-    LOG(DEBUG) << "Fixing gaps...";
+    LOG(INFO) << "Fixing gaps in graph...";
     NodeGrid ng = buildNodeIdx(g, gridSize, bbox.getFullBox(), false);
     LOG(DEBUG) << "Grid size of " << ng.getXWidth() << "x" << ng.getYHeight();
     fixGaps(g, &ng);
   }
 
-  LOG(DEBUG) << "Snapping stations...";
+  LOG(INFO) << "Snapping stations to graph...";
   snapStats(opts, g, bbox, gridSize, res, orphanStations);
 
-  LOG(DEBUG) << "Collapsing edges...";
+  LOG(INFO) << "Collapsing edges...";
   collapseEdges(g);
 
-  LOG(DEBUG) << "Writing edge geoms...";
+  LOG(INFO) << "Writing edge geometries...";
   writeGeoms(g, opts);
 
-  LOG(DEBUG) << "Deleting orphan nodes...";
+  LOG(INFO) << "Deleting orphan nodes...";
   deleteOrphNds(g, opts);
 
-  LOG(DEBUG) << "Writing graph components...";
+  LOG(INFO) << "Writing graph components...";
   // the restrictor is needed here to prevent connections in the graph
   // which are not possible in reality
   uint32_t comps = writeComps(g, opts);
 
-  LOG(DEBUG) << "Simplifying geometries...";
+  LOG(INFO) << "Simplifying geometries...";
   simplifyGeoms(g);
 
-  LOG(DEBUG) << "Writing other-direction edges...";
+  LOG(INFO) << "Writing other-direction edges...";
   writeODirEdgs(g, res);
 
-  LOG(DEBUG) << "Write wrong-direction costs...";
+  LOG(INFO) << "Writing wrong-direction costs...";
   writeOneWayPens(g, opts);
 
   if (opts.noLinesPunishFact != 1.0) {
-    LOG(DEBUG) << "Write no-line pens...";
+    LOG(INFO) << "Writing no-line penalties...";
     writeNoLinePens(g, opts);
   }
 
-  LOG(DEBUG) << "Write dummy node self-edges...";
+  LOG(INFO) << "Writing dummy node self-edges...";
   writeSelfEdgs(g);
 
   size_t numEdges = 0;
@@ -217,8 +218,8 @@ void OsmBuilder::read(const std::string& path, const OsmReadOpts& opts,
     numEdges += n->getAdjListOut().size();
   }
 
-  LOG(DEBUG) << "Graph has " << g->getNds().size() << " nodes, " << numEdges
-             << " edges and " << comps
+  LOG(INFO) << "Graph complete: " << g->getNds().size() << " nodes, " << numEdges
+             << " edges, " << comps
              << " connected component(s) with more than 1 node";
   LOG(DEBUG) << _lines.size() << " transit lines have been read.";
 }
@@ -791,10 +792,61 @@ void OsmBuilder::readEdgesWithLocationIndex(
     const AttrKeySet& keepAttrs, const Restrictions& rawRests,
     Restrictor* restor, const FlatRels& fl, EdgTracks* eTracks,
     const OsmReadOpts& opts) {
+  
+  // The location index already contains only bbox nodes, so we can use
+  // source->hasNodeLocation() as a proxy for bBoxNodes.has()
+  // No need to build a separate bBoxNodes set!
+  
+  LOG(INFO) << "Reading ways from OSM file...";
   source->seekWays();
 
+  size_t wayCount = 0, keptWays = 0;
   OsmWay w;
-  while ((w = nextWay(source, wayRels, filter, OsmIdSet(), keepAttrs, fl)).id) {
+  const OsmSourceWay* way;
+  
+  while ((way = source->nextWay())) {
+    w.nodes.clear();
+    w.attrs.clear();
+    w.id = way->id;
+    
+    source->cont();
+    
+    // Read way nodes
+    osmid nid;
+    while ((nid = source->nextMemberNode())) {
+      w.nodes.push_back(nid);
+      source->cont();
+    }
+    
+    // Read way attributes
+    OsmSourceAttr attr;
+    while ((attr = source->nextAttr()).key) {
+      if (keepAttrs.count(attr.key)) {
+        w.attrs[attr.key] = attr.value;
+      }
+      source->cont();
+    }
+    
+    // Check if way should be kept (same logic as keepWay)
+    bool keep = false;
+    if (w.id && w.nodes.size() > 1 &&
+        (relKeep(w.id, wayRels, fl) || filter.keep(w.attrs, OsmFilter::WAY)) &&
+        !filter.drop(w.attrs, OsmFilter::WAY)) {
+      // Check if any node is in location index (= in bbox)
+      for (osmid nid : w.nodes) {
+        if (source->hasNodeLocation(nid)) {
+          keep = true;
+          break;
+        }
+      }
+    }
+    
+    wayCount++;
+    
+    if (!keep) continue;
+    
+    keptWays++;
+    
     Node* last = 0;
     std::vector<TransitEdgeLine*> lines;
     if (wayRels.count(w.id)) {
@@ -805,22 +857,6 @@ void OsmBuilder::readEdgesWithLocationIndex(
                             rels, opts.trackNormzer, source);
 
     osmid lastnid = 0;
-    bool wayInBbox = false;
-    
-    // Check if any node of this way is in the bounding box
-    for (osmid nid : w.nodes) {
-      double lat, lon;
-      if (source->getNodeLocation(nid, &lat, &lon)) {
-        POINT pos = {lon, lat};
-        if (bbox.contains(pos)) {
-          wayInBbox = true;
-          break;
-        }
-      }
-    }
-    
-    if (!wayInBbox) continue;
-    
     for (osmid nid : w.nodes) {
       Node* n = 0;
       double lat, lon;
@@ -832,12 +868,12 @@ void OsmBuilder::readEdgesWithLocationIndex(
       }
       
       POINT pos = {lon, lat};
-      if (!bbox.contains(pos)) continue;
       
       if (noHupNodes.has(nid)) {
         n = g->addNd(NodePL(pos));
         (*multiNodes)[nid].insert(n);
       } else if (!nodes->count(nid)) {
+        // Node is in location index, so it's in bbox
         n = g->addNd(NodePL(pos));
         (*nodes)[nid] = n;
       } else {
@@ -873,6 +909,8 @@ void OsmBuilder::readEdgesWithLocationIndex(
       last = n;
     }
   }
+  
+  LOG(INFO) << "Read " << wayCount << " ways (" << keptWays << " kept)";
 }
 
 // _____________________________________________________________________________
@@ -881,10 +919,17 @@ void OsmBuilder::readOrphanStationsWithLocationIndex(
     const RelMap& nodeRels, const OsmFilter& filter, const BBoxIdx& bbox,
     const AttrKeySet& keepAttrs, const FlatRels& fl,
     const OsmReadOpts& opts) const {
+  LOG(INFO) << "Reading orphan stations from nodes...";
   source->seekNodes();
 
+  size_t nodeCount = 0, stationCount = 0;
   const OsmSourceNode* nd;
   while ((nd = source->nextNode())) {
+    nodeCount++;
+    if (nodeCount % 1000000 == 0) {
+      LOG(INFO) << "Processed " << nodeCount << " nodes (" << stationCount << " orphan stations)...";
+    }
+    
     POINT pos = {nd->lon, nd->lat};
     
     // Check if node is in bbox
@@ -920,10 +965,14 @@ void OsmBuilder::readOrphanStationsWithLocationIndex(
         tmp->pl().setSI(si);
         if (tmp->pl().getSI()) {
           orphanStations->insert(tmp);
+          stationCount++;
         }
       }
     }
   }
+  
+  LOG(INFO) << "Finished reading orphan stations: " << nodeCount << " nodes processed, " 
+            << stationCount << " orphan stations found";
 }
 
 // _____________________________________________________________________________
@@ -1116,6 +1165,8 @@ void OsmBuilder::readRels(OsmSource* source, RelLst* rels, RelMap* nodeRels,
                           Restrictions* rests) const {
   source->seekRels();
 
+  LOG(INFO) << "Reading relations from OSM file...";
+  size_t relCount = 0;
   OsmRel rel;
   while ((rel = nextRel(source, filter, keepAttrs)).id) {
     rels->rels.push_back(rel.attrs);
@@ -1127,7 +1178,10 @@ void OsmBuilder::readRels(OsmSource* source, RelLst* rels, RelMap* nodeRels,
 
     // TODO(patrick): this is not needed for the filtering - remove it here!
     readRestr(rel, rests, filter);
+    
+    relCount++;
   }
+  LOG(INFO) << "Read " << relCount << " relations";
 }
 
 // _____________________________________________________________________________

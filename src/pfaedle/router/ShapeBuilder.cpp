@@ -391,7 +391,7 @@ Stats ShapeBuilder::shapeify(pfaedle::netgraph::Graph* outNg) {
   EDijkstra::ITERS = 0;
 
   T_START(cluster);
-  LOG(DEBUG) << "Clustering trips...";
+  LOG(INFO) << "Clustering trips...";
   const TripForests& forests = clusterTrips(_feed, _mots);
   for (const auto& forest : forests) {
     for (const auto& trie : forest.second) {
@@ -399,13 +399,12 @@ Stats ShapeBuilder::shapeify(pfaedle::netgraph::Graph* outNg) {
       stats.numTrieLeafs += trie.getNdTrips().size();
     }
   }
-  LOG(DEBUG) << "Clustered trips into " << stats.numTries
-             << " tries with a total of " << stats.numTrieLeafs << " leafs in "
-             << T_STOP(cluster) << "ms";
+  LOG(INFO) << "Clustered " << stats.totNumTrips << " trips into " << stats.numTries
+             << " tries in " << (T_STOP(cluster) / 1000000.0) << " ms";
 
-  LOG(DEBUG) << "Building candidate cache...";
+  LOG(INFO) << "Building candidate cache...";
   buildCandCache(forests);
-  LOG(DEBUG) << "Done.";
+  LOG(INFO) << "Candidate cache built";
 
   std::map<std::string, size_t> shpUse;
   RouteRefColors refColors;
@@ -457,7 +456,8 @@ Stats ShapeBuilder::shapeify(pfaedle::netgraph::Graph* outNg) {
   stats.solveTime = TOOK_UNTIL(tStart, TIME());
 
   LOG(INFO) << "Matched " << stats.totNumTrips << " trips in " << std::fixed
-            << std::setprecision(2) << stats.solveTime << " ms.";
+            << std::setprecision(2) << (stats.solveTime / 1000000.0) << " ms ("
+            << std::setprecision(1) << (stats.solveTime / 1000000000.0) << " s)";
 
   // merge colors
   for (auto& cols : colors) {

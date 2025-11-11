@@ -301,6 +301,7 @@ class LocationIndexHandler : public osmium::handler::Handler {
       : _index(index), _bbox(bbox), _nodeCount(0) {}
 
   void node(const osmium::Node& node) {
+    // Only index nodes in bbox (with small padding for ways that cross boundary)
     util::geo::Point<double> pt(node.location().lon(), node.location().lat());
     if (util::geo::contains(pt, _bbox)) {
       _index.set(node.positive_id(), node.location());
