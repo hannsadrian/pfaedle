@@ -5,12 +5,17 @@
 #include <float.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <exception>
 #include <iostream>
 #include <limits>
 #include <map>
+#include <mutex>
+#include <queue>
 #include <stack>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -800,9 +805,12 @@ void OsmBuilder::readEdgesWithLocationIndex(
   LOG(INFO) << "Reading ways from OSM file...";
   source->seekWays();
 
-  size_t wayCount = 0, keptWays = 0;
+  size_t wayCount = 0, keptWays = 0, rejectedByTags = 0, rejectedByNodes = 0;
   OsmWay w;
   const OsmSourceWay* way;
+  
+  // Pre-allocate to avoid repeated allocations
+  w.nodes.reserve(128);
   
   while ((way = source->nextWay())) {
     w.nodes.clear();
@@ -827,23 +835,37 @@ void OsmBuilder::readEdgesWithLocationIndex(
       source->cont();
     }
     
-    // Check if way should be kept (same logic as keepWay)
-    bool keep = false;
-    if (w.id && w.nodes.size() > 1 &&
-        (relKeep(w.id, wayRels, fl) || filter.keep(w.attrs, OsmFilter::WAY)) &&
-        !filter.drop(w.attrs, OsmFilter::WAY)) {
-      // Check if any node is in location index (= in bbox)
-      for (osmid nid : w.nodes) {
-        if (source->hasNodeLocation(nid)) {
-          keep = true;
+    wayCount++;
+    
+    // Early rejection: Check filter BEFORE expensive node location checks
+    if (w.id && w.nodes.size() > 1) {
+      // Check filter first (cheaper than node lookups)
+      bool passesFilter = (relKeep(w.id, wayRels, fl) || 
+                          filter.keep(w.attrs, OsmFilter::WAY)) &&
+                          !filter.drop(w.attrs, OsmFilter::WAY);
+      
+      if (!passesFilter) {
+        rejectedByTags++;
+        continue;
+      }
+      
+      // Only now check if any node is in location index (= in bbox)
+      bool hasRelevantNode = false;
+      for (osmid nodeId : w.nodes) {
+        if (source->hasNodeLocation(nodeId)) {
+          hasRelevantNode = true;
           break;
         }
       }
+      
+      if (!hasRelevantNode) {
+        rejectedByNodes++;
+        continue;
+      }
+    } else {
+      rejectedByTags++;
+      continue;
     }
-    
-    wayCount++;
-    
-    if (!keep) continue;
     
     keptWays++;
     
@@ -910,7 +932,10 @@ void OsmBuilder::readEdgesWithLocationIndex(
     }
   }
   
-  LOG(INFO) << "Read " << wayCount << " ways (" << keptWays << " kept)";
+  LOG(INFO) << "Read " << wayCount << " ways ("
+            << keptWays << " kept, "
+            << rejectedByTags << " rejected by filter, "
+            << rejectedByNodes << " rejected by bbox)";
 }
 
 // _____________________________________________________________________________

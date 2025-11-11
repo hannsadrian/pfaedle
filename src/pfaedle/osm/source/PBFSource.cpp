@@ -6,9 +6,11 @@
 #include <sys/stat.h>
 #include <cassert>
 #include <fstream>
+#include <thread>
 
 #include <osmium/handler.hpp>
 #include <osmium/visitor.hpp>
+#include <osmium/thread/pool.hpp>
 
 #include "pfaedle/osm/source/PBFSource.h"
 #include "util/log/Log.h"
@@ -62,7 +64,17 @@ PBFSource::~PBFSource() {
 // _____________________________________________________________________________
 void PBFSource::initReader() {
   osmium::io::File input_file{_path};
-  _reader = std::make_unique<osmium::io::Reader>(input_file, osmium::osm_entity_bits::all);
+  
+  // Create reader with multi-threaded decompression enabled
+  // Osmium automatically uses multiple threads for PBF decompression
+  _reader = std::make_unique<osmium::io::Reader>(
+    input_file, 
+    osmium::osm_entity_bits::all,
+    osmium::io::read_meta::no  // Don't read metadata (version, timestamp, etc.) for speed
+  );
+  
+  const int num_threads = std::thread::hardware_concurrency();
+  LOG(util::DEBUG) << "Initialized PBF reader (osmium uses up to " << num_threads << " threads for decompression)";
 }
 
 // _____________________________________________________________________________
