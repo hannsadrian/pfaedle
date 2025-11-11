@@ -393,13 +393,18 @@ Stats ShapeBuilder::shapeify(pfaedle::netgraph::Graph* outNg) {
   T_START(cluster);
   LOG(INFO) << "Clustering trips...";
   const TripForests& forests = clusterTrips(_feed, _mots);
+  
+  size_t totalTrips = 0;
   for (const auto& forest : forests) {
     for (const auto& trie : forest.second) {
       stats.numTries++;
       stats.numTrieLeafs += trie.getNdTrips().size();
+      for (const auto& trips : trie.getNdTrips()) {
+        totalTrips += trips.second.size();
+      }
     }
   }
-  LOG(INFO) << "Clustered " << stats.totNumTrips << " trips into " << stats.numTries
+  LOG(INFO) << "Clustered " << totalTrips << " trips into " << stats.numTries
              << " tries in " << (T_STOP(cluster) / 1000000.0) << " ms";
 
   LOG(INFO) << "Building candidate cache...";
@@ -863,20 +868,20 @@ TripForests ShapeBuilder::clusterTrips(Feed* f, MOTs mots) {
   TripForests forest;
   std::map<RoutingAttrs, std::vector<Trip*>> trips;
 
-  // warm the stop name normalizer caches so a
-  // multithreaded access later on will never write to the underlying cache
-  for (auto& stop : f->getStops()) {
-    const auto& snormzer = _motCfg.osmBuildOpts.statNormzer;
-    auto normedName = snormzer.norm(stop.getName());
-  }
-
-  // cluster by routing attr for parallization later on
+  // First pass: collect trips and identify which stops are actually used
+  T_START(attrBuild);
+  std::set<const Stop*> usedStops;
   for (auto& trip : f->getTrips()) {
     if (!_cfg.dropShapes && !trip.getShape().empty()) continue;
     if (trip.getStopTimes().size() < 2) continue;
     if (!mots.count(trip.getRoute()->getType()) ||
         !_motCfg.mots.count(trip.getRoute()->getType()))
       continue;
+
+    // Collect stops used by this trip
+    for (const auto& st : trip.getStopTimes()) {
+      usedStops.insert(st.getStop());
+    }
 
     // important: we are building the routing attributes here, so a
     // multithreaded access later on will never write to the underlying cache
@@ -885,7 +890,21 @@ TripForests ShapeBuilder::clusterTrips(Feed* f, MOTs mots) {
     trips[rAttrs].push_back(&trip);
     forest[rAttrs] = {};
   }
+  LOG(INFO) << "Built routing attrs for " << trips.size() << " attr groups in " 
+              << (T_STOP(attrBuild) / 1000000.0) << " ms";
 
+  // warm the stop name normalizer caches ONLY for stops actually used
+  // (instead of all stops in the feed)
+  T_START(normCache);
+  const auto& snormzer = _motCfg.osmBuildOpts.statNormzer;
+  for (const auto* stop : usedStops) {
+    auto normedName = snormzer.norm(stop->getName());
+  }
+  LOG(INFO) << "Warmed normalizer cache for " << usedStops.size() << " used stops (of " 
+              << f->getStops().size() << " total) in " 
+              << (T_STOP(normCache) / 1000000.0) << " ms";
+
+  T_START(clustering);
   size_t numThreads = std::thread::hardware_concurrency();
   std::vector<std::thread> thrds(numThreads);
   std::vector<std::vector<RoutingAttrs>> attrs(numThreads);
@@ -904,6 +923,9 @@ TripForests ShapeBuilder::clusterTrips(Feed* f, MOTs mots) {
   }
 
   for (auto& thr : thrds) thr.join();
+
+  LOG(INFO) << "Clustered into tries in " 
+            << (T_STOP(clustering) / 1000000.0) << " ms";
 
   return forest;
 }

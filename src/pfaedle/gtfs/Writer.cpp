@@ -20,6 +20,7 @@
 #include "ad/cppgtfs/gtfs/flat/Agency.h"
 #include "ad/util/CsvWriter.h"
 #include "pfaedle/gtfs/Writer.h"
+#include "util/log/Log.h"
 
 using ad::cppgtfs::Parser;
 using ad::util::CsvWriter;
@@ -280,6 +281,7 @@ void Writer::write(gtfs::Feed* sourceFeed, const std::string& path) const {
     curFileTg = gtfsPath + "/trips.txt";
     fs.open(curFile.c_str());
     if (!fs.good()) cannotWrite(curFile, curFileTg);
+    LOG(util::INFO) << "Writing trips.txt...";
     bool hasFreqs = writeTrips(sourceFeed, &fs);
     fs.close();
 
@@ -316,6 +318,7 @@ void Writer::write(gtfs::Feed* sourceFeed, const std::string& path) const {
     fs.open(curFile.c_str());
 
     if (!fs.good()) cannotWrite(curFile, curFileTg);
+    LOG(util::INFO) << "Writing stop_times.txt...";
     writeStopTimes(sourceFeed, &fs);
     fs.close();
 
@@ -392,6 +395,7 @@ void Writer::write(gtfs::Feed* sourceFeed, const std::string& path) const {
 #ifdef LIBZIP_FOUND
     std::string targetZipPath = gtfsPath + "/" + zipFileName;
     if (!za) cannotWrite(targetZipPath);
+    LOG(util::INFO) << "Finalizing ZIP archive...";
     zip_close(za);
     if (std::rename(tmpZip.c_str(), targetZipPath.c_str()))
       cannotWrite(targetZipPath);
@@ -666,6 +670,11 @@ void Writer::writeFareRules(gtfs::Feed* sourceFeed, std::ostream* os) const {
 
 // ____________________________________________________________________________
 void Writer::writeShapes(gtfs::Feed* sourceFeed, std::ostream* os) const {
+  // Use large buffer for better I/O performance with millions of rows
+  constexpr size_t BUFFER_SIZE = 2 * 1024 * 1024; // 2MB buffer
+  std::vector<char> buffer(BUFFER_SIZE);
+  os->rdbuf()->pubsetbuf(buffer.data(), BUFFER_SIZE);
+  
   auto csvw = ad::cppgtfs::Writer::getShapesCsvw(os);
   csvw->flushLine();
   ad::cppgtfs::gtfs::flat::ShapePoint sp;
@@ -720,6 +729,11 @@ bool Writer::writeTrips(gtfs::Feed* sourceFeed, std::ostream* os) const {
 
 // ____________________________________________________________________________
 void Writer::writeStopTimes(gtfs::Feed* sourceFeed, std::ostream* os) const {
+  // Use large buffer for better I/O performance with millions of rows
+  constexpr size_t BUFFER_SIZE = 2 * 1024 * 1024; // 2MB buffer
+  std::vector<char> buffer(BUFFER_SIZE);
+  os->rdbuf()->pubsetbuf(buffer.data(), BUFFER_SIZE);
+  
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("stop_times.txt");
   ad::cppgtfs::Writer w;
@@ -742,8 +756,10 @@ void Writer::writeStopTimes(gtfs::Feed* sourceFeed, std::ostream* os) const {
       
       // Pre-build index of sequence -> shape distance for this trip
       curStopDistances.clear();
-      for (const auto& stN : cur->getStopTimes()) {
-        curStopDistances[stN.getSeq()] = stN.getShapeDistanceTravelled();
+      if (cur) {
+        for (const auto& stN : cur->getStopTimes()) {
+          curStopDistances[stN.getSeq()] = stN.getShapeDistanceTravelled();
+        }
       }
     }
     
