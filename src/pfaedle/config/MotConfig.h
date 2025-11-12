@@ -18,6 +18,7 @@ struct MotConfig {
   osm::OsmReadOpts osmBuildOpts;
   router::RoutingOpts routingOpts;
   std::string transWeight;
+  std::string osmPath;  // MOT-specific OSM file path (optional, overrides command-line -x)
 };
 
 inline bool operator==(const MotConfig& a, const MotConfig& b) {

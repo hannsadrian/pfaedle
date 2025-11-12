@@ -285,8 +285,17 @@ int main(int argc, char** argv) {
 
       T_START(osmBuild);
 
+      // Determine which OSM file to use for this MOT
+      std::string osmPath = cfg.osmPath;  // Default from command line
+      
+      if (!motCfg.osmPath.empty()) {
+        // MOT-specific OSM file configured in pfaedle.cfg
+        osmPath = motCfg.osmPath;
+        LOG(INFO) << "Using MOT-specific OSM file: " << osmPath;
+      }
+
       if (fStops.size())
-        osmBuilder.read(cfg.osmPath, motCfg.osmBuildOpts, &graph, box,
+        osmBuilder.read(osmPath, motCfg.osmBuildOpts, &graph, box,
                         cfg.gridSize, &restr);
 
       tOsmBuild += T_STOP(osmBuild);

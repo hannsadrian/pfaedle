@@ -57,7 +57,7 @@ For example, you may generate (and replace existing, see `-D` flag) shapes for t
 
 ```shell
 $ wget https://fritz.freiburg.de/csv_Downloads/VAGFR.zip
-$ wget http://download.geofabrik.de/europe/germany/baden-wuerttemberg/freiburg-regbez-latest.osm.bz2
+$ wget https://download.geofabrik.de/europe/germany/baden-wuerttemberg/freiburg-regbez-latest.osm.bz2
 $ pfaedle -D -x freiburg-regbez-latest.osm.bz2 VAGFR.zip
 ```
 

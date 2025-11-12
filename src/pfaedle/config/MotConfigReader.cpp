@@ -52,6 +52,12 @@ void MotConfigReader::parse(const std::vector<std::string>& paths,
     std::string secStr = sec.first;
     if (secStr.empty()) continue;
 
+    // Parse MOT-specific OSM file path (optional)
+    if (p.hasKey(secStr, "osm_file")) {
+      cfg.osmPath = p.getStr(secStr, "osm_file");
+      LOG(DEBUG) << "MOT-specific OSM file for [" << secStr << "]: " << cfg.osmPath;
+    }
+
     if (p.hasKey(secStr, "routing_emission_method")) {
       cfg.routingOpts.emPenMethod =
           p.getStr(secStr, "routing_emission_method");

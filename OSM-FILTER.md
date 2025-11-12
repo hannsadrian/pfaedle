@@ -1,6 +1,34 @@
-# THIS CAN BE DRIVEN FURTHER BY TARGETING EACH MOT SPECIFICALLY
+# MOT-Specific OSM Files
 
-after extracting the filtered and regional fitted osm.pbfs, set up a flow inside of workload.example.json
+Pfaedle now supports using different OSM files for different modes of transport (MOTs). This is useful when:
+- **Long-distance trains** need a large OSM extract (e.g., `europe-latest.osm.pbf`)
+- **Local transit** (bus, tram) can use smaller country-specific extracts (e.g., `germany-latest.osm.pbf`)
+
+This significantly reduces processing time for local transit while maintaining accuracy for international routes.
+
+## Configuration
+
+Add `osm_file:` to any MOT section in `pfaedle.cfg`:
+
+```cfg
+[rail]
+# Use Europe OSM for international trains
+osm_file: europe-latest.osm.pbf
+
+# ... rest of rail config ...
+
+[bus, tram, subway]
+# Use Germany OSM for local transit
+osm_file: germany-latest.osm.pbf
+
+# ... rest of config ...
+
+[coach]
+# Coach routes may cross borders
+osm_file: europe-latest.osm.pbf
+```
+
+# Preparing osm.pbf files
 
 ```bash
 # Combined extract by polygon + tag filter (RECOMMENDED)
