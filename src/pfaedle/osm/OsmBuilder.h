@@ -156,12 +156,15 @@ private:
                  const FlatRels &flatRels);
 
   // Optimized functions using location index for PBF files
-  void readEdgesWithLocationIndex(
-      source::PBFSource *source, Graph *g, const RelLst &rels,
-      const RelMap &wayRels, const OsmFilter &filter, NIdMap *nodes,
-      NIdMultMap *multNodes, const OsmIdSet &noHupNodes,
-      const AttrKeySet &keepAttrs, const Restrictions &rest, Restrictor *restor,
-      const FlatRels &flatRels, EdgTracks *etracks, const OsmReadOpts &opts);
+  void readEdgesWithLocationIndex(source::PBFSource *source, Graph *g,
+                                  const RelLst &rels, const RelMap &wayRels,
+                                  const OsmFilter &filter, NIdMap *nodes,
+                                  NIdMultMap *multNodes,
+                                  const OsmIdSet &noHupNodes,
+                                  const AttrKeySet &keepAttrs,
+                                  const Restrictions &rest, Restrictor *restor,
+                                  const FlatRels &flatRels, EdgTracks *etracks,
+                                  const OsmReadOpts &opts, const BBoxIdx &bbox);
 
   void readOrphanStationsWithLocationIndex(
       source::PBFSource *source, Graph *g, NodeSet *orphanStations,

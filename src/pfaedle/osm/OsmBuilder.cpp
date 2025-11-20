@@ -125,7 +125,8 @@ void OsmBuilder::read(const std::string &path, const OsmReadOpts &opts,
       LOG(DEBUG) << "Pass 2: Reading edges with location index...";
       readEdgesWithLocationIndex(pbfSource, g, intmRels, wayRels, filter,
                                  &nodes, &multNodes, noHupNodes, attrKeys[1],
-                                 rawRests, res, intmRels.flat, &eTracks, opts);
+                                 rawRests, res, intmRels.flat, &eTracks, opts,
+                                 bbox);
 
       // NOTE: Skipping orphan stations scan for performance optimization
       // Orphan stations are rare (stations not connected to any way)
@@ -811,7 +812,7 @@ void OsmBuilder::readEdgesWithLocationIndex(
     const OsmFilter &filter, NIdMap *nodes, NIdMultMap *multiNodes,
     const OsmIdSet &noHupNodes, const AttrKeySet &keepAttrs,
     const Restrictions &rawRests, Restrictor *restor, const FlatRels &fl,
-    EdgTracks *eTracks, const OsmReadOpts &opts) {
+    EdgTracks *eTracks, const OsmReadOpts &opts, const BBoxIdx &bbox) {
 
   // The location index already contains only bbox nodes, so we can use
   // source->hasNodeLocation() as a proxy for bBoxNodes.has()
@@ -836,12 +837,15 @@ void OsmBuilder::readEdgesWithLocationIndex(
   source->readWaysParallel([&](const osmium::Way &way, int thread_id) {
     total_ways++;
 
-    // 1. Fast BBox Check
+    // 1. Real BBox Check (using indexed coordinates)
     bool inBBox = false;
     for (const auto &node : way.nodes()) {
-      if (source->hasNodeLocation(node.ref())) {
-        inBBox = true;
-        break;
+      double lat, lon;
+      if (source->getNodeLocation(node.ref(), &lat, &lon)) {
+        if (bbox.contains(Point<double>(lon, lat))) {
+          inBBox = true;
+          break;
+        }
       }
     }
 
@@ -882,6 +886,10 @@ void OsmBuilder::readEdgesWithLocationIndex(
 
   LOG(INFO) << "Parallel read complete. Processed " << total_ways
             << " ways, kept " << kept_ways << ". Building graph...";
+
+  if (kept_ways == 0) {
+    LOG(util::WARN) << "No ways kept after filtering! Graph will be empty.";
+  }
 
   // 4. Aggregate and build graph (Single-threaded)
   // This part modifies the Graph, which is not thread-safe, so we do it here.
