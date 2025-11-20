@@ -19,3 +19,4 @@ compile_commands.json
 *.cppr
 *.hr
 .DS_Store
+.cache/
