@@ -271,22 +271,78 @@ void PBFSource::resetWayIterators() {
 // _____________________________________________________________________________
 void PBFSource::readWaysParallel(
     std::function<void(const osmium::Way &, int)> callback) {
-  readParallel<osmium::Way, osmium::item_type::way>(
-      osmium::osm_entity_bits::way, callback);
-}
+  _reader->close();
+  initReader(osmium::osm_entity_bits::way);
 
-// _____________________________________________________________________________
-void PBFSource::readNodesParallel(
-    std::function<void(const osmium::Node &, int)> callback) {
-  readParallel<osmium::Node, osmium::item_type::node>(
-      osmium::osm_entity_bits::node, callback);
-}
+  const int num_threads = std::thread::hardware_concurrency();
+  std::vector<std::thread> threads;
 
-// _____________________________________________________________________________
-void PBFSource::readRelsParallel(
-    std::function<void(const osmium::Relation &, int)> callback) {
-  readParallel<osmium::Relation, osmium::item_type::relation>(
-      osmium::osm_entity_bits::relation, callback);
+  // Thread-safe queue for buffers
+  std::queue<osmium::memory::Buffer> buffer_queue;
+  std::mutex queue_mutex;
+  std::condition_variable queue_cv;
+  std::condition_variable producer_cv; // For backpressure
+  const size_t MAX_QUEUE_SIZE = 10;    // Limit memory usage
+  bool done = false;
+
+  // Worker function
+  auto worker = [&](int thread_id) {
+    while (true) {
+      osmium::memory::Buffer buffer;
+      {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        queue_cv.wait(lock, [&] { return !buffer_queue.empty() || done; });
+
+        if (buffer_queue.empty() && done) {
+          return;
+        }
+
+        buffer = std::move(buffer_queue.front());
+        buffer_queue.pop();
+      }
+      producer_cv.notify_one(); // Notify producer that space is available
+
+      // Process buffer
+      for (const auto &entity : buffer) {
+        if (entity.type() == osmium::item_type::way) {
+          callback(static_cast<const osmium::Way &>(entity), thread_id);
+        }
+      }
+    }
+  };
+
+  // Start workers
+  for (int i = 0; i < num_threads; ++i) {
+    threads.emplace_back(worker, i);
+  }
+
+  // Producer (main thread)
+  while (osmium::memory::Buffer buffer = _reader->read()) {
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      // Wait if queue is full
+      producer_cv.wait(lock,
+                       [&] { return buffer_queue.size() < MAX_QUEUE_SIZE; });
+      buffer_queue.push(std::move(buffer));
+    }
+    queue_cv.notify_one();
+  }
+
+  // Signal completion
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    done = true;
+  }
+  queue_cv.notify_all();
+
+  // Join threads
+  for (auto &t : threads) {
+    t.join();
+  }
+
+  _curNode = nullptr;
+  _curWay = nullptr;
+  _curRel = nullptr;
 }
 
 // _____________________________________________________________________________
@@ -348,38 +404,17 @@ void PBFSource::buildLocationIndex(const util::geo::Box<double> &bbox) {
   // Create the location index
   _locationIndex = std::make_unique<LocationIndex>();
 
-  const int num_threads = std::thread::hardware_concurrency();
-  LOG(util::INFO) << "Building location index in parallel using " << num_threads
-                  << " threads...";
+  // Create a new reader for building the index
+  osmium::io::File input_file{_path};
+  osmium::io::Reader reader{input_file, osmium::osm_entity_bits::node};
 
-  // Thread-local storage for nodes
-  struct NodeInfo {
-    osmium::unsigned_object_id_type id;
-    osmium::Location loc;
-  };
-  std::vector<std::vector<NodeInfo>> thread_nodes(num_threads);
-  std::atomic<size_t> total_nodes(0);
+  // Build the index
+  LocationIndexHandler handler(*_locationIndex, bbox);
+  osmium::apply(reader, handler);
+  reader.close();
 
-  readNodesParallel([&](const osmium::Node &node, int thread_id) {
-    util::geo::Point<double> pt(node.location().lon(), node.location().lat());
-    if (util::geo::contains(pt, bbox)) {
-      thread_nodes[thread_id].push_back({node.positive_id(), node.location()});
-      total_nodes++;
-    }
-  });
-
-  LOG(util::INFO) << "Found " << total_nodes
-                  << " nodes in bbox. Inserting into index...";
-
-  // Insert into index (single-threaded as SparseMemArray is likely not
-  // thread-safe for writes)
-  for (const auto &nodes : thread_nodes) {
-    for (const auto &info : nodes) {
-      _locationIndex->set(info.id, info.loc);
-    }
-  }
-
-  LOG(util::INFO) << "Location index built.";
+  LOG(util::INFO) << "Location index built with " << handler.nodeCount()
+                  << " nodes";
 }
 
 // _____________________________________________________________________________

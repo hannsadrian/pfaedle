@@ -58,14 +58,6 @@ public:
   // to num_threads-1)
   void readWaysParallel(std::function<void(const osmium::Way &, int)> callback);
 
-  // Read nodes in parallel using multiple threads
-  void
-  readNodesParallel(std::function<void(const osmium::Node &, int)> callback);
-
-  // Read relations in parallel using multiple threads
-  void
-  readRelsParallel(std::function<void(const osmium::Relation &, int)> callback);
-
   virtual util::geo::Box<double> getBounds();
 
   virtual std::string decode(const char *str) const;
@@ -110,82 +102,6 @@ private:
 
   void readNextBuffer();
   void advanceToNextEntity(osmium::item_type type);
-  template <typename T, osmium::item_type ItemType>
-  void readParallel(osmium::osm_entity_bits::type entity_bit,
-                    std::function<void(const T &, int)> callback) {
-    _reader->close();
-    initReader(entity_bit);
-
-    const int num_threads = std::thread::hardware_concurrency();
-    std::vector<std::thread> threads;
-
-    // Thread-safe queue for buffers
-    std::queue<osmium::memory::Buffer> buffer_queue;
-    std::mutex queue_mutex;
-    std::condition_variable queue_cv;
-    std::condition_variable producer_cv; // For backpressure
-    const size_t MAX_QUEUE_SIZE = 10;    // Limit memory usage
-    bool done = false;
-
-    // Worker function
-    auto worker = [&](int thread_id) {
-      while (true) {
-        osmium::memory::Buffer buffer;
-        {
-          std::unique_lock<std::mutex> lock(queue_mutex);
-          queue_cv.wait(lock, [&] { return !buffer_queue.empty() || done; });
-
-          if (buffer_queue.empty() && done) {
-            return;
-          }
-
-          buffer = std::move(buffer_queue.front());
-          buffer_queue.pop();
-        }
-        producer_cv.notify_one(); // Notify producer that space is available
-
-        // Process buffer
-        for (const auto &entity : buffer) {
-          if (entity.type() == ItemType) {
-            callback(static_cast<const T &>(entity), thread_id);
-          }
-        }
-      }
-    };
-
-    // Start workers
-    for (int i = 0; i < num_threads; ++i) {
-      threads.emplace_back(worker, i);
-    }
-
-    // Producer (main thread)
-    while (osmium::memory::Buffer buffer = _reader->read()) {
-      {
-        std::unique_lock<std::mutex> lock(queue_mutex);
-        // Wait if queue is full
-        producer_cv.wait(lock,
-                         [&] { return buffer_queue.size() < MAX_QUEUE_SIZE; });
-        buffer_queue.push(std::move(buffer));
-      }
-      queue_cv.notify_one();
-    }
-
-    // Signal completion
-    {
-      std::lock_guard<std::mutex> lock(queue_mutex);
-      done = true;
-    }
-    queue_cv.notify_all();
-
-    // Join threads
-    for (auto &t : threads) {
-      t.join();
-    }
-
-    _curNode = nullptr;
-    _curWay = nullptr;
-    _curRel = nullptr;
-  }
   void initReader(
       osmium::osm_entity_bits::type entities = osmium::osm_entity_bits::all);
 };

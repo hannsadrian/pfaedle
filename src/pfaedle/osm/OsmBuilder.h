@@ -116,10 +116,6 @@ private:
                 RelMap *wayRels, const OsmFilter &filter,
                 const AttrKeySet &keepAttrs, Restrictions *rests) const;
 
-  void readRels(source::PBFSource *source, RelLst *rels, RelMap *nodeRels,
-                RelMap *wayRels, const OsmFilter &filter,
-                const AttrKeySet &keepAttrs, Restrictions *rests) const;
-
   void readRestr(const OsmRel &rel, Restrictions *rests,
                  const OsmFilter &filter) const;
 

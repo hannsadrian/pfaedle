@@ -118,7 +118,7 @@ void OsmBuilder::read(const std::string &path, const OsmReadOpts &opts,
       // Pass 1: Build location index for bbox nodes and read relations
       LOG(DEBUG) << "Pass 1: Building location index and reading relations...";
       pbfSource->buildLocationIndex(bbox.getFullBox());
-      readRels(pbfSource, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
+      readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
                &rawRests);
 
       // Pass 2: Read ways and build edges using location index
@@ -1204,82 +1204,9 @@ OsmRel OsmBuilder::nextRel(OsmSource *source, const OsmFilter &filter,
 }
 
 // _____________________________________________________________________________
-void OsmBuilder::readRels(source::PBFSource *source, RelLst *rels,
-                          RelMap *nodeRels, RelMap *wayRels,
-                          const OsmFilter &filter, const AttrKeySet &keepAttrs,
-                          Restrictions *rests) const {
-  LOG(INFO) << "Reading relations from OSM file in parallel...";
-
-  int num_threads = std::thread::hardware_concurrency();
-
-  struct KeptRel {
-    OsmRel rel;
-  };
-
-  std::vector<std::vector<KeptRel>> thread_rels(num_threads);
-  std::atomic<size_t> relCount(0);
-
-  source->readRelsParallel([&](const osmium::Relation &rel, int thread_id) {
-    // Convert osmium relation to OsmRel (partial, just enough for filtering)
-    // We need to extract attributes to check the filter
-    AttrMap attrs;
-    for (const auto &tag : rel.tags()) {
-      if (keepAttrs.count(tag.key())) {
-        attrs[tag.key()] = tag.value();
-      }
-    }
-
-    uint64_t keepFlags = 0;
-    uint64_t dropFlags = 0;
-
-    if (rel.id() && !attrs.empty() &&
-        (keepFlags = filter.keep(attrs, OsmFilter::REL)) &&
-        !(dropFlags = filter.drop(attrs, OsmFilter::REL))) {
-
-      OsmRel r;
-      r.id = rel.id();
-      r.attrs = std::move(attrs);
-      r.keepFlags = keepFlags;
-      r.dropFlags = dropFlags;
-
-      for (const auto &member : rel.members()) {
-        if (member.type() == osmium::item_type::node) {
-          r.nodes.push_back(member.ref());
-          r.nodeRoles.push_back(member.role());
-        } else if (member.type() == osmium::item_type::way) {
-          r.ways.push_back(member.ref());
-          r.wayRoles.push_back(member.role());
-        }
-      }
-
-      thread_rels[thread_id].push_back({std::move(r)});
-      relCount++;
-    }
-  });
-
-  LOG(INFO) << "Read " << relCount << " relations. Merging...";
-
-  for (const auto &t_rels : thread_rels) {
-    for (const auto &kr : t_rels) {
-      rels->rels.push_back(kr.rel.attrs);
-      if (kr.rel.keepFlags & osm::REL_NO_DOWN) {
-        rels->flat.insert(rels->rels.size() - 1);
-      }
-      for (osmid id : kr.rel.nodes)
-        (*nodeRels)[id].push_back(rels->rels.size() - 1);
-      for (osmid id : kr.rel.ways)
-        (*wayRels)[id].push_back(rels->rels.size() - 1);
-
-      // TODO(patrick): this is not needed for the filtering - remove it here!
-      readRestr(kr.rel, rests, filter);
-    }
-  }
-}
-
-// _____________________________________________________________________________
-void OsmBuilder::readRels(source::OsmSource *source, RelLst *rels,
-                          RelMap *nodeRels, RelMap *wayRels,
-                          const OsmFilter &filter, const AttrKeySet &keepAttrs,
+void OsmBuilder::readRels(OsmSource *source, RelLst *rels, RelMap *nodeRels,
+                          RelMap *wayRels, const OsmFilter &filter,
+                          const AttrKeySet &keepAttrs,
                           Restrictions *rests) const {
   source->seekRels();
 
