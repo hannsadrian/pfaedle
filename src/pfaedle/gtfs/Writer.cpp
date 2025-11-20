@@ -10,7 +10,7 @@
 
 #include <cstdio>
 #include <fstream>
-
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -31,7 +31,7 @@ using pfaedle::gtfs::Writer;
 using util::getTmpFName;
 
 // ____________________________________________________________________________
-void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
+void Writer::write(gtfs::Feed* sourceFeed, const std::string& path) const {
   bool toZip =
       (path.size() > 3 && 0 == path.compare(path.size() - 4, 4, ".zip"));
 
@@ -43,11 +43,10 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
   std::string tmpZip;
   std::string zipFileName;
 
-  if (gtfsPath.size() == 0)
-    gtfsPath = ".";
+  if (gtfsPath.size() == 0) gtfsPath = ".";
 
 #ifdef LIBZIP_FOUND
-  zip *za = 0;
+  zip* za = 0;
 
   if (toZip) {
     const size_t slashIdx = path.rfind('/');
@@ -88,8 +87,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "agency.txt");
     curFileTg = gtfsPath + "/agency.txt";
     fs.open(curFile.c_str());
-    if (!fs.good())
-      cannotWrite(curFile, curFileTg);
+    if (!fs.good()) cannotWrite(curFile, curFileTg);
     writeAgency(sourceFeed, &fs);
     fs.close();
 
@@ -105,8 +103,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "stops.txt");
     curFileTg = gtfsPath + "/stops.txt";
     fs.open(curFile.c_str());
-    if (!fs.good())
-      cannotWrite(curFile, curFileTg);
+    if (!fs.good()) cannotWrite(curFile, curFileTg);
     writeStops(sourceFeed, &fs);
     fs.close();
 
@@ -122,8 +119,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "routes.txt");
     curFileTg = gtfsPath + "/routes.txt";
     fs.open(curFile.c_str());
-    if (!fs.good())
-      cannotWrite(curFile, curFileTg);
+    if (!fs.good()) cannotWrite(curFile, curFileTg);
     writeRoutes(sourceFeed, &fs);
     fs.close();
 
@@ -141,8 +137,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "calendar.txt");
       curFileTg = gtfsPath + "/calendar.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeCalendar(sourceFeed, &fs);
       fs.close();
       if (toZip) {
@@ -160,8 +155,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "calendar_dates.txt");
       curFileTg = gtfsPath + "/calendar_dates.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeCalendarDates(sourceFeed, &fs);
       fs.close();
       if (toZip) {
@@ -179,8 +173,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "transfers.txt");
       curFileTg = gtfsPath + "/transfers.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeTransfers(sourceFeed, &fs);
       fs.close();
       if (toZip) {
@@ -198,8 +191,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "fare_attributes.txt");
       curFileTg = gtfsPath + "/fare_attributes.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeFares(sourceFeed, &fs);
       fs.close();
       if (toZip) {
@@ -217,8 +209,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "fare_rules.txt");
       curFileTg = gtfsPath + "/fare_rules.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeFareRules(sourceFeed, &fs);
       fs.close();
       if (toZip) {
@@ -236,8 +227,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "pathways.txt");
       curFileTg = gtfsPath + "/pathways.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writePathways(sourceFeed, &fs);
       fs.close();
 
@@ -256,8 +246,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "levels.txt");
       curFileTg = gtfsPath + "/levels.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeLevels(sourceFeed, &fs);
       fs.close();
 
@@ -274,8 +263,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "shapes.txt");
     curFileTg = gtfsPath + "/shapes.txt";
     fs.open(curFile.c_str());
-    if (!fs.good())
-      cannotWrite(curFile, curFileTg);
+    if (!fs.good()) cannotWrite(curFile, curFileTg);
     LOG(util::INFO) << "Writing shapes.txt...";
     writeShapes(sourceFeed, &fs);
     fs.close();
@@ -292,8 +280,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "trips.txt");
     curFileTg = gtfsPath + "/trips.txt";
     fs.open(curFile.c_str());
-    if (!fs.good())
-      cannotWrite(curFile, curFileTg);
+    if (!fs.good()) cannotWrite(curFile, curFileTg);
     LOG(util::INFO) << "Writing trips.txt...";
     bool hasFreqs = writeTrips(sourceFeed, &fs);
     fs.close();
@@ -312,8 +299,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "frequencies.txt");
       curFileTg = gtfsPath + "/frequencies.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeFrequencies(sourceFeed, &fs);
       fs.close();
 
@@ -331,8 +317,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     curFileTg = gtfsPath + "/stop_times.txt";
     fs.open(curFile.c_str());
 
-    if (!fs.good())
-      cannotWrite(curFile, curFileTg);
+    if (!fs.good()) cannotWrite(curFile, curFileTg);
     LOG(util::INFO) << "Writing stop_times.txt...";
     writeStopTimes(sourceFeed, &fs);
     fs.close();
@@ -351,8 +336,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "feed_info.txt");
       curFileTg = gtfsPath + "/feed_info.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeFeedInfo(sourceFeed, &fs);
       fs.close();
 
@@ -369,8 +353,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "attributions.txt");
     curFileTg = gtfsPath + "/attributions.txt";
     fs.open(curFile.c_str());
-    if (!fs.good())
-      cannotWrite(curFile, curFileTg);
+    if (!fs.good()) cannotWrite(curFile, curFileTg);
     writeAttributions(sourceFeed, &fs);
     fs.close();
 
@@ -388,8 +371,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
       curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "translations.txt");
       curFileTg = gtfsPath + "/translations.txt";
       fs.open(curFile.c_str());
-      if (!fs.good())
-        cannotWrite(curFile, curFileTg);
+      if (!fs.good()) cannotWrite(curFile, curFileTg);
       writeTranslations(sourceFeed, &fs);
       fs.close();
 
@@ -412,8 +394,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
   if (toZip) {
 #ifdef LIBZIP_FOUND
     std::string targetZipPath = gtfsPath + "/" + zipFileName;
-    if (!za)
-      cannotWrite(targetZipPath);
+    if (!za) cannotWrite(targetZipPath);
     LOG(util::INFO) << "Finalizing ZIP archive...";
     zip_close(za);
     if (std::rename(tmpZip.c_str(), targetZipPath.c_str()))
@@ -423,7 +404,7 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeTranslations(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeTranslations(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("translations.txt");
   auto csvw = ad::cppgtfs::Writer::getTranslationsCsvw(os);
@@ -441,7 +422,7 @@ void Writer::writeTranslations(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeAttributions(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeAttributions(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("attributions.txt");
   auto csvw = ad::cppgtfs::Writer::getAttributionsCsvw(os);
@@ -455,8 +436,7 @@ void Writer::writeAttributions(gtfs::Feed *sourceFeed, std::ostream *os) const {
     auto flds = Parser::getAttributionsFlds(csvp.get());
 
     while (p.nextAttribution(csvp.get(), &a, flds)) {
-      if (a.organizationName == "OpenStreetMap contributors")
-        hasOsm = true;
+      if (a.organizationName == "OpenStreetMap contributors") hasOsm = true;
       w.writeAttribution(a, csvw.get());
     }
   }
@@ -479,7 +459,7 @@ void Writer::writeAttributions(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeFeedInfo(gtfs::Feed *f, std::ostream *os) const {
+void Writer::writeFeedInfo(gtfs::Feed* f, std::ostream* os) const {
   auto csvw = ad::cppgtfs::Writer::getFeedInfoCsvw(os);
   csvw->flushLine();
   csvw->writeString(f->getPublisherName());
@@ -501,7 +481,7 @@ void Writer::writeFeedInfo(gtfs::Feed *f, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writePathways(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writePathways(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("pathways.txt");
   ad::cppgtfs::Writer w;
@@ -518,7 +498,7 @@ void Writer::writePathways(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeLevels(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeLevels(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("levels.txt");
   ad::cppgtfs::Writer w;
@@ -535,7 +515,7 @@ void Writer::writeLevels(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeAgency(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeAgency(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("agency.txt");
 
@@ -554,7 +534,7 @@ void Writer::writeAgency(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeStops(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeStops(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("stops.txt");
   ad::cppgtfs::Writer w;
@@ -572,7 +552,7 @@ void Writer::writeStops(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeRoutes(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeRoutes(gtfs::Feed* sourceFeed, std::ostream* os) const {
   ad::cppgtfs::Writer w;
 
   auto csvw =
@@ -586,7 +566,7 @@ void Writer::writeRoutes(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeCalendar(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeCalendar(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("calendar.txt");
   ad::cppgtfs::Writer w;
@@ -603,8 +583,8 @@ void Writer::writeCalendar(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeCalendarDates(gtfs::Feed *sourceFeed,
-                                std::ostream *os) const {
+void Writer::writeCalendarDates(gtfs::Feed* sourceFeed,
+                                std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("calendar_dates.txt");
   ad::cppgtfs::Writer w;
@@ -621,7 +601,7 @@ void Writer::writeCalendarDates(gtfs::Feed *sourceFeed,
 }
 
 // ____________________________________________________________________________
-void Writer::writeFrequencies(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeFrequencies(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("frequencies.txt");
   ad::cppgtfs::Writer w;
@@ -638,7 +618,7 @@ void Writer::writeFrequencies(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeTransfers(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeTransfers(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("transfers.txt");
   ad::cppgtfs::Writer w;
@@ -655,7 +635,7 @@ void Writer::writeTransfers(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeFares(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeFares(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("fare_attributes.txt");
   ad::cppgtfs::Writer w;
@@ -672,7 +652,7 @@ void Writer::writeFares(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeFareRules(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeFareRules(gtfs::Feed* sourceFeed, std::ostream* os) const {
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("fare_rules.txt");
   ad::cppgtfs::Writer w;
@@ -689,12 +669,12 @@ void Writer::writeFareRules(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeShapes(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeShapes(gtfs::Feed* sourceFeed, std::ostream* os) const {
   // Use large buffer for better I/O performance with millions of rows
   constexpr size_t BUFFER_SIZE = 2 * 1024 * 1024; // 2MB buffer
   std::vector<char> buffer(BUFFER_SIZE);
   os->rdbuf()->pubsetbuf(buffer.data(), BUFFER_SIZE);
-
+  
   auto csvw = ad::cppgtfs::Writer::getShapesCsvw(os);
   csvw->flushLine();
   ad::cppgtfs::gtfs::flat::ShapePoint sp;
@@ -710,8 +690,7 @@ void Writer::writeShapes(gtfs::Feed *sourceFeed, std::ostream *os) const {
     std::string curSkipShapeId;
 
     while (p.nextShapePoint(csvp.get(), &sp, flds)) {
-      if (sp.id == curSkipShapeId)
-        continue;
+      if (sp.id == curSkipShapeId) continue;
       if (sp.id != curShapeId) {
         if (sourceFeed->getShapes().has(sp.id)) {
           curShapeId = sp.id;
@@ -732,7 +711,7 @@ void Writer::writeShapes(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-bool Writer::writeTrips(gtfs::Feed *sourceFeed, std::ostream *os) const {
+bool Writer::writeTrips(gtfs::Feed* sourceFeed, std::ostream* os) const {
   ad::cppgtfs::Writer w;
   bool hasFreqs = false;
 
@@ -741,8 +720,7 @@ bool Writer::writeTrips(gtfs::Feed *sourceFeed, std::ostream *os) const {
   csvw->flushLine();
 
   for (auto t : sourceFeed->getTrips()) {
-    if (t.getFrequencies().size())
-      hasFreqs = true;
+    if (t.getFrequencies().size()) hasFreqs = true;
     w.writeTrip(t.getFlat(), csvw.get(), sourceFeed->getTripAddFlds());
   }
 
@@ -750,12 +728,12 @@ bool Writer::writeTrips(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ____________________________________________________________________________
-void Writer::writeStopTimes(gtfs::Feed *sourceFeed, std::ostream *os) const {
+void Writer::writeStopTimes(gtfs::Feed* sourceFeed, std::ostream* os) const {
   // Use large buffer for better I/O performance with millions of rows
   constexpr size_t BUFFER_SIZE = 2 * 1024 * 1024; // 2MB buffer
   std::vector<char> buffer(BUFFER_SIZE);
   os->rdbuf()->pubsetbuf(buffer.data(), BUFFER_SIZE);
-
+  
   Parser p(sourceFeed->getPath());
   auto csvp = p.getCsvParser("stop_times.txt");
   ad::cppgtfs::Writer w;
@@ -767,42 +745,28 @@ void Writer::writeStopTimes(gtfs::Feed *sourceFeed, std::ostream *os) const {
   auto flds = Parser::getStopTimeFlds(csvp.get());
 
   std::string curTripId;
-  Trip *cur = 0;
-
-  // Iterator for the current trip's stop times
-  // We assume that both the input CSV and the Trip object's stop times are
-  // sorted by sequence
-  std::vector<StopTime<Stop>>::const_iterator curTripStopTimeIter;
-  std::vector<StopTime<Stop>>::const_iterator curTripStopTimeEnd;
+  Trip* cur = 0;
+  std::map<uint32_t, float> curStopDistances;  // sequence -> shape distance
 
   while (p.nextStopTime(csvp.get(), &st, flds)) {
     // we may have changed to a different trip
     if (curTripId != st.trip) {
       cur = sourceFeed->getTrips().get(st.trip);
       curTripId = st.trip;
-
+      
+      // Pre-build index of sequence -> shape distance for this trip
+      curStopDistances.clear();
       if (cur) {
-        curTripStopTimeIter = cur->getStopTimes().begin();
-        curTripStopTimeEnd = cur->getStopTimes().end();
-      } else {
-        // Ensure iterators are invalid if trip not found
-        curTripStopTimeIter = curTripStopTimeEnd;
+        for (const auto& stN : cur->getStopTimes()) {
+          curStopDistances[stN.getSeq()] = stN.getShapeDistanceTravelled();
+        }
       }
     }
-
-    // Advance iterator to find the matching sequence
-    // Since sequences are sorted, we only need to move forward
-    if (cur) {
-      while (curTripStopTimeIter != curTripStopTimeEnd &&
-             curTripStopTimeIter->getSeq() < st.sequence) {
-        ++curTripStopTimeIter;
-      }
-
-      if (curTripStopTimeIter != curTripStopTimeEnd &&
-          curTripStopTimeIter->getSeq() == st.sequence) {
-        st.shapeDistTravelled =
-            curTripStopTimeIter->getShapeDistanceTravelled();
-      }
+    
+    // O(log n) lookup instead of O(n) search
+    auto it = curStopDistances.find(st.sequence);
+    if (it != curStopDistances.end()) {
+      st.shapeDistTravelled = it->second;
     }
 
     w.writeStopTime(st, csvw.get());
@@ -810,14 +774,14 @@ void Writer::writeStopTimes(gtfs::Feed *sourceFeed, std::ostream *os) const {
 }
 
 // ___________________________________________________________________________
-void Writer::cannotWrite(const std::string &file) {
+void Writer::cannotWrite(const std::string& file) {
   std::stringstream ss;
   ss << "Could not write to file";
   throw ad::cppgtfs::WriterException(ss.str(), file);
 }
 
 // ___________________________________________________________________________
-void Writer::cannotWrite(const std::string &file, const std::string &file2) {
+void Writer::cannotWrite(const std::string& file, const std::string& file2) {
   std::stringstream ss;
   ss << "(temporary file for " << file2 << ") Could not write to file";
   throw ad::cppgtfs::WriterException(ss.str(), file);
@@ -825,10 +789,10 @@ void Writer::cannotWrite(const std::string &file, const std::string &file2) {
 
 // ___________________________________________________________________________
 #ifdef LIBZIP_FOUND
-void Writer::moveIntoZip(zip *za, const std::string &sourcePath,
-                         const std::string &targetPath) {
-  zip_source_t *s;
-  FILE *fp = fopen(sourcePath.c_str(), "r");
+void Writer::moveIntoZip(zip* za, const std::string& sourcePath,
+                         const std::string& targetPath) {
+  zip_source_t* s;
+  FILE* fp = fopen(sourcePath.c_str(), "r");
   if (fp == 0) {
     std::stringstream ss;
     ss << "(temporary file for " << targetPath << ") Could not open file";

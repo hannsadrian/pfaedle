@@ -361,19 +361,15 @@ void PBFSource::buildLocationIndex(const util::geo::Box<double> &bbox) {
   std::atomic<size_t> total_nodes(0);
 
   readNodesParallel([&](const osmium::Node &node, int thread_id) {
-    // util::geo::Point<double> pt(node.location().lon(),
-    // node.location().lat()); if (util::geo::contains(pt, bbox)) {
-    thread_nodes[thread_id].push_back({node.positive_id(), node.location()});
-    total_nodes++;
-    // }
+    util::geo::Point<double> pt(node.location().lon(), node.location().lat());
+    if (util::geo::contains(pt, bbox)) {
+      thread_nodes[thread_id].push_back({node.positive_id(), node.location()});
+      total_nodes++;
+    }
   });
 
   LOG(util::INFO) << "Found " << total_nodes
                   << " nodes in bbox. Inserting into index...";
-
-  if (total_nodes == 0) {
-    LOG(util::WARN) << "No nodes found in bounding box! Graph will be empty.";
-  }
 
   // Insert into index (single-threaded as SparseMemArray is likely not
   // thread-safe for writes)
