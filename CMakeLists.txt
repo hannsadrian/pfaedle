@@ -23,7 +23,7 @@ set(EXECUTABLE_OUTPUT_PATH "${CMAKE_BINARY_DIR}")
 # -fassociative-math: Allow re-association of operands in FP expressions
 # -freciprocal-math: Allow x/y to be optimized as x * (1/y)
 # We explicitly DO NOT use -ffinite-math-only as it breaks infinity()
-set(CMAKE_CXX_FLAGS                "-O3 -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math -freciprocal-math -Wall -Wno-format-extra-args -Wextra -Wformat-nonliteral -Wformat-security -Wformat=2 -Wextra -Wno-implicit-fallthrough -pedantic -Wno-keyword-macro")
+set(CMAKE_CXX_FLAGS                "-O3 -fno-math-errno -fno-trapping-math -fno-signed-zeros -fassociative-math -freciprocal-math -Wall -Wno-format-extra-args -Wextra -Wformat-nonliteral -Wformat-security -Wformat=2 -Wextra -Wno-implicit-fallthrough -pedantic")
 set(CMAKE_CXX_FLAGS_SANITIZE       "-Og -g -fsanitize=address -fsanitize=leak -fsanitize=undefined -DLOGLEVEL=4 -DPFAEDLE_DBG=1")
 set(CMAKE_CXX_FLAGS_PROFILE        "-g -pg -DLOGLEVEL=4 -DPFAEDLE_DBG=1")
 set(CMAKE_CXX_FLAGS_DEBUG          "-Og -g -DLOGLEVEL=4 -DPFAEDLE_DBG=1")
