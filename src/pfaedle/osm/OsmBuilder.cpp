@@ -60,11 +60,8 @@ using pfaedle::trgraph::Normalizer;
 using pfaedle::trgraph::StatInfo;
 using pfaedle::trgraph::TransitEdgeLine;
 using util::DEBUG;
-using util::ERROR;
 using util::INFO;
 using util::Nullable;
-using util::VDEBUG;
-using util::WARN;
 using util::geo::Box;
 using util::geo::M_PER_DEG;
 
@@ -834,7 +831,7 @@ void OsmBuilder::readEdgesWithLocationIndex(
   LOG(INFO) << "Reading ways in parallel using " << num_threads
             << " threads...";
 
-  source->readWaysParallel([&](const osmium::Way &way, int thread_id) {
+  source->readWaysParallel([&](const osmium::Way &way, int /*thread_id*/) {
     total_ways++;
 
     // 1. Fast BBox Check

@@ -4,7 +4,7 @@
 
 #include <atomic>
 #include <cstdlib>
-#include <limits>
+
 #include <map>
 #include <mutex>
 #include <random>
@@ -710,70 +710,9 @@ const RoutingAttrs &ShapeBuilder::getRAttrs(const Trip *trip) const {
 // _____________________________________________________________________________
 void ShapeBuilder::getGtfsBox(const Feed *feed, const MOTs &mots,
                               const std::string &tid, bool dropShapes,
-                              osm::BBoxIdx *box, double maxSpeed,
+                              osm::BBoxIdx *box, double /*maxSpeed*/,
                               std::vector<double> *hopDists,
-                              uint8_t verbosity) {
-  // Sanity check: Calculate safe bounds to exclude outliers
-  std::vector<double> lats, lons;
-  for (const auto &t : feed->getTrips()) {
-    if (!tid.empty() && t.getId() != tid)
-      continue;
-    if (tid.empty() && !t.getShape().empty() && !dropShapes)
-      continue;
-    if (t.getStopTimes().size() < 2)
-      continue;
-    if (mots.count(t.getRoute()->getType())) {
-      for (const auto &st : t.getStopTimes()) {
-        lats.push_back(st.getStop()->getLat());
-        lons.push_back(st.getStop()->getLng());
-      }
-    }
-  }
-
-  double minLat = -90, maxLat = 90, minLon = -180, maxLon = 180;
-  if (lats.size() > 4) {
-    std::sort(lats.begin(), lats.end());
-    std::sort(lons.begin(), lons.end());
-
-    // Use Interquartile Range (IQR) to detect outliers robustly
-    // Q1 (25th percentile) and Q3 (75th percentile)
-    size_t q1_idx = lats.size() * 0.25;
-    size_t q3_idx = lats.size() * 0.75;
-
-    double latIQR = lats[q3_idx] - lats[q1_idx];
-    double lonIQR = lons[q3_idx] - lons[q1_idx];
-
-    // Ensure a minimum spread to avoid filtering dense local networks too
-    // aggressively 0.5 degrees is roughly 55km, so 5*0.5 = 275km buffer minimum
-    double minSpread = 0.5;
-    double latSpread = std::max(latIQR, minSpread);
-    double lonSpread = std::max(lonIQR, minSpread);
-
-    // Use a generous factor (5x IQR) to only catch extreme outliers
-    double factor = 5.0;
-
-    minLat = lats[q1_idx] - (latSpread * factor);
-    maxLat = lats[q3_idx] + (latSpread * factor);
-    minLon = lons[q1_idx] - (lonSpread * factor);
-    maxLon = lons[q3_idx] + (lonSpread * factor);
-
-    // Clamp to valid coordinates
-    minLat = std::max(-90.0, minLat);
-    maxLat = std::min(90.0, maxLat);
-    minLon = std::max(-180.0, minLon);
-    maxLon = std::min(180.0, maxLon);
-
-    LOG(INFO) << "BBox sanity check: keeping stops within " << minLat << ","
-              << minLon << " and " << maxLat << "," << maxLon
-              << " (IQR-based outlier detection)";
-    LOG(INFO) << "Inspect bounding box: http://bboxfinder.com/#" << minLat
-              << "," << minLon << "," << maxLat << "," << maxLon;
-  }
-
-  std::set<std::string> warnedStops;
-  static size_t outlierWarningCount = 0;
-  const size_t MAX_OUTLIER_WARNINGS = 10;
-
+                              uint8_t /*verbosity*/) {
   for (const auto &t : feed->getTrips()) {
     if (!tid.empty() && t.getId() != tid)
       continue;
@@ -785,80 +724,15 @@ void ShapeBuilder::getGtfsBox(const Feed *feed, const MOTs &mots,
     if (mots.count(t.getRoute()->getType())) {
       DBox cur;
       for (size_t i = 0; i < t.getStopTimes().size(); i++) {
-        // skip outliers
         const auto &st = t.getStopTimes()[i];
-
-        // Check against safe bounds
-        if (st.getStop()->getLat() < minLat ||
-            st.getStop()->getLat() > maxLat ||
-            st.getStop()->getLng() < minLon ||
-            st.getStop()->getLng() > maxLon) {
-          if (warnedStops.find(st.getStop()->getId()) == warnedStops.end()) {
-            if (outlierWarningCount < MAX_OUTLIER_WARNINGS) {
-              LOG(WARN) << "Skipping outlier station '"
-                        << st.getStop()->getName() << "' ("
-                        << st.getStop()->getId() << ") @ "
-                        << st.getStop()->getLat() << ", "
-                        << st.getStop()->getLng() << " (outside safe bbox)";
-            } else if (outlierWarningCount == MAX_OUTLIER_WARNINGS) {
-              LOG(WARN) << "... and more outlier stations skipped (suppressing "
-                           "further warnings)";
-            }
-            outlierWarningCount++;
-            warnedStops.insert(st.getStop()->getId());
-          }
-          continue;
-        }
-
-        int toTime = std::numeric_limits<int>::max();
-        double toD = 0;
-        int fromTime = std::numeric_limits<int>::max();
-        double fromD = 0;
 
         if (i > 0) {
           const auto &stPrev = t.getStopTimes()[i - 1];
-          toTime = st.getArrivalTime().seconds() -
-                   stPrev.getDepartureTime().seconds();
-          toD = util::geo::haversine(
+          double toD = util::geo::haversine(
               st.getStop()->getLat(), st.getStop()->getLng(),
               stPrev.getStop()->getLat(), stPrev.getStop()->getLng());
           if (hopDists)
             hopDists->push_back(toD);
-        }
-
-        if (i < t.getStopTimes().size() - 1) {
-          const auto &stNext = t.getStopTimes()[i + 1];
-          fromTime = stNext.getArrivalTime().seconds() -
-                     st.getDepartureTime().seconds();
-          fromD = util::geo::haversine(
-              st.getStop()->getLat(), st.getStop()->getLng(),
-              stNext.getStop()->getLat(), stNext.getStop()->getLng());
-        }
-
-        const double reqToTime = toD / maxSpeed;
-        const double reqFromTime = fromD / maxSpeed;
-
-        const double BUFFER = 5 * 60;
-
-        if (reqToTime > (BUFFER + toTime) * 3 * MAX_ROUTE_COST_DOUBLING_STEPS &&
-            reqFromTime >
-                (BUFFER + fromTime) * 3 * MAX_ROUTE_COST_DOUBLING_STEPS) {
-          if (verbosity) {
-            LOG(WARN)
-                << "Skipping station '" << st.getStop()->getName() << "' ("
-                << st.getStop()->getId() << ") @ " << st.getStop()->getLat()
-                << ", " << st.getStop()->getLng()
-                << " for bounding box as the vehicle cannot realistically "
-                   "reach and leave it in the scheduled time";
-          } else {
-            LOG(DEBUG)
-                << "Skipping station '" << st.getStop()->getName() << "' ("
-                << st.getStop()->getId() << ") @ " << st.getStop()->getLat()
-                << ", " << st.getStop()->getLng()
-                << " for bounding box as the vehicle cannot realistically "
-                   "reach and leave it in the scheduled time";
-          }
-          continue;
         }
 
         cur = extendBox(DPoint(st.getStop()->getLng(), st.getStop()->getLat()),
