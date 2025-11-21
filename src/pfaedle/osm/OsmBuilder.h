@@ -272,6 +272,7 @@ protected:
 
   std::map<TransitEdgeLine, TransitEdgeLine *> _lines;
   std::map<size_t, TransitEdgeLine *> _relLines;
+  mutable std::mutex _linesMutex;
 };
 } // namespace osm
 } // namespace pfaedle

@@ -38,6 +38,7 @@ using pfaedle::osm::EdgeGrid;
 using pfaedle::osm::EqSearch;
 using pfaedle::osm::NodeGrid;
 using pfaedle::osm::OsmBuilder;
+using pfaedle::osm::osmid;
 using pfaedle::osm::OsmNode;
 using pfaedle::osm::OsmRel;
 using pfaedle::osm::OsmWay;
@@ -806,6 +807,7 @@ void OsmBuilder::processRestr(osmid nid, osmid wid,
 }
 
 // _____________________________________________________________________________
+// _____________________________________________________________________________
 void OsmBuilder::readEdgesWithLocationIndex(
     PBFSource *source, Graph *g, const RelLst &rels, const RelMap &wayRels,
     const OsmFilter &filter, NIdMap *nodes, NIdMultMap *multiNodes,
@@ -820,15 +822,14 @@ void OsmBuilder::readEdgesWithLocationIndex(
   LOG(INFO) << "Reading ways from OSM file...";
   source->seekWays();
 
-  // Thread-local storage for ways that pass the filter
-  // We use a vector of vectors to avoid locking during the parallel phase
   int num_threads = std::thread::hardware_concurrency();
-  std::vector<std::vector<OsmWay>> thread_ways(num_threads);
 
-  // Statistics (atomic not strictly needed if we aggregate later, but good for
-  // progress logging if we added it)
+  // Statistics
   std::atomic<size_t> total_ways(0);
   std::atomic<size_t> kept_ways(0);
+
+  // Mutex for graph updates
+  std::mutex graphMutex;
 
   LOG(INFO) << "Reading ways in parallel using " << num_threads
             << " threads...";
@@ -849,8 +850,6 @@ void OsmBuilder::readEdgesWithLocationIndex(
       return;
 
     // 2. Filter Check
-    // We need to extract attributes to check the filter
-    // This is a bit expensive but only done for ways in bbox
     AttrMap attrs;
     for (const auto &tag : way.tags()) {
       if (keepAttrs.count(tag.key())) {
@@ -867,88 +866,85 @@ void OsmBuilder::readEdgesWithLocationIndex(
 
     kept_ways++;
 
-    // 3. Store for main thread processing
-    // We copy the data we need because the osmium::Way object is temporary
-    OsmWay w;
-    w.id = way.id();
-    w.attrs = std::move(attrs);
-    w.nodes.reserve(way.nodes().size());
-    for (const auto &node : way.nodes()) {
-      w.nodes.push_back(node.ref());
+    // 3. Pre-compute attributes (Parallel, no lock)
+    std::vector<TransitEdgeLine *> lines;
+    if (wayRels.count(way.id())) {
+      lines = getLines(wayRels.find(way.id())->second, rels, opts, source);
+    }
+    std::string track =
+        getAttrByFirstMatch(opts.edgePlatformRules, way.id(), attrs, wayRels,
+                            rels, opts.trackNormzer, source);
+    int level = filter.level(attrs);
+
+    int oneway = 0;
+    if (filter.oneway(attrs)) {
+      oneway = 1;
+    } else if (filter.onewayrev(attrs)) {
+      oneway = 2;
     }
 
-    thread_ways[thread_id].push_back(std::move(w));
+    // 4. Update Graph (Sequential, locked)
+    // We lock only for the graph modification part.
+    // This avoids buffering millions of ProcessedWay objects.
+    std::lock_guard<std::mutex> lock(graphMutex);
+
+    Node *last = 0;
+    osmid lastnid = 0;
+
+    for (const auto &node : way.nodes()) {
+      osmid nid = node.ref();
+      Node *n = 0;
+      double lat, lon;
+
+      // Get node location from location index
+      if (!source->getNodeLocation(nid, &lat, &lon)) {
+        continue;
+      }
+
+      POINT pos = {lon, lat};
+
+      if (noHupNodes.has(nid)) {
+        n = g->addNd(NodePL(pos));
+        (*multiNodes)[nid].insert(n);
+      } else if (!nodes->count(nid)) {
+        n = g->addNd(NodePL(pos));
+        (*nodes)[nid] = n;
+      } else {
+        n = (*nodes)[nid];
+        const POINT *geom = n->pl().getGeom();
+        if (!geom || (geom->getX() == 0 && geom->getY() == 0)) {
+          n->pl().setGeom(pos);
+        }
+      }
+
+      if (last) {
+        auto e = g->addEdg(last, n, EdgePL());
+        if (!e)
+          continue;
+
+        processRestr(nid, way.id(), rawRests, e, n, restor);
+        processRestr(lastnid, way.id(), rawRests, e, last, restor);
+
+        e->pl().addLines(lines);
+        e->pl().setLvl(level);
+        if (!track.empty())
+          (*eTracks)[e] = track;
+
+        if (oneway == 1) {
+          e->pl().setOneWay(1);
+          LOG(DEBUG) << "Way " << way.id() << ": Set oneway=1 (forward)";
+        } else if (oneway == 2) {
+          e->pl().setOneWay(2);
+          LOG(DEBUG) << "Way " << way.id() << ": Set oneway=2 (reverse)";
+        }
+      }
+      lastnid = nid;
+      last = n;
+    }
   });
 
   LOG(INFO) << "Parallel read complete. Processed " << total_ways
-            << " ways, kept " << kept_ways << ". Building graph...";
-
-  // 4. Aggregate and build graph (Single-threaded)
-  // This part modifies the Graph, which is not thread-safe, so we do it here.
-  for (const auto &ways : thread_ways) {
-    for (const auto &w : ways) {
-      Node *last = 0;
-      std::vector<TransitEdgeLine *> lines;
-      if (wayRels.count(w.id)) {
-        lines = getLines(wayRels.find(w.id)->second, rels, opts, source);
-      }
-      std::string track =
-          getAttrByFirstMatch(opts.edgePlatformRules, w.id, w.attrs, wayRels,
-                              rels, opts.trackNormzer, source);
-
-      osmid lastnid = 0;
-      for (osmid nid : w.nodes) {
-        Node *n = 0;
-        double lat, lon;
-
-        // Get node location from location index
-        if (!source->getNodeLocation(nid, &lat, &lon)) {
-          continue;
-        }
-
-        POINT pos = {lon, lat};
-
-        if (noHupNodes.has(nid)) {
-          n = g->addNd(NodePL(pos));
-          (*multiNodes)[nid].insert(n);
-        } else if (!nodes->count(nid)) {
-          n = g->addNd(NodePL(pos));
-          (*nodes)[nid] = n;
-        } else {
-          n = (*nodes)[nid];
-          const POINT *geom = n->pl().getGeom();
-          if (!geom || (geom->getX() == 0 && geom->getY() == 0)) {
-            n->pl().setGeom(pos);
-          }
-        }
-
-        if (last) {
-          auto e = g->addEdg(last, n, EdgePL());
-          if (!e)
-            continue;
-
-          processRestr(nid, w.id, rawRests, e, n, restor);
-          processRestr(lastnid, w.id, rawRests, e, last, restor);
-
-          e->pl().addLines(lines);
-          e->pl().setLvl(filter.level(w.attrs));
-          if (!track.empty())
-            (*eTracks)[e] = track;
-
-          if (filter.oneway(w.attrs)) {
-            e->pl().setOneWay(1);
-            LOG(DEBUG) << "Way " << w.id << ": Set oneway=1 (forward)";
-          }
-          if (filter.onewayrev(w.attrs)) {
-            e->pl().setOneWay(2);
-            LOG(DEBUG) << "Way " << w.id << ": Set oneway=2 (reverse)";
-          }
-        }
-        lastnid = nid;
-        last = n;
-      }
-    }
-  }
+            << " ways, kept " << kept_ways << ". Graph built.";
 }
 
 // _____________________________________________________________________________
@@ -1633,79 +1629,95 @@ OsmBuilder::getLines(const std::vector<size_t> &edgeRels, const RelLst &rels,
   for (size_t relId : edgeRels) {
     TransitEdgeLine *elp = 0;
 
-    if (_relLines.count(relId)) {
-      elp = _relLines[relId];
-    } else {
-      TransitEdgeLine el;
-      el.color = ad::cppgtfs::gtfs::NO_COLOR;
+    {
+      std::lock_guard<std::mutex> lock(_linesMutex);
+      if (_relLines.count(relId)) {
+        elp = _relLines[relId];
+      }
+    }
 
-      bool found = false;
-      for (const auto &r : ops.relLinerules.sNameRule) {
-        for (const auto &relAttr : rels.rels[relId]) {
-          if (relAttr.first == r) {
-            el.shortName = ops.lineNormzer.norm(source->decode(relAttr.second));
-            if (!el.shortName.empty())
-              found = true;
+    if (elp) {
+      ret.push_back(elp);
+      continue;
+    }
+
+    TransitEdgeLine el;
+    el.color = ad::cppgtfs::gtfs::NO_COLOR;
+
+    bool found = false;
+    for (const auto &r : ops.relLinerules.sNameRule) {
+      for (const auto &relAttr : rels.rels[relId]) {
+        if (relAttr.first == r) {
+          el.shortName = ops.lineNormzer.norm(source->decode(relAttr.second));
+          if (!el.shortName.empty())
+            found = true;
+        }
+      }
+      if (found)
+        break;
+    }
+
+    found = false;
+    for (const auto &r : ops.relLinerules.fromNameRule) {
+      for (const auto &relAttr : rels.rels[relId]) {
+        if (relAttr.first == r) {
+          el.fromStr = ops.statNormzer.norm(source->decode(relAttr.second));
+          if (!el.fromStr.empty())
+            found = true;
+        }
+      }
+      if (found)
+        break;
+    }
+
+    found = false;
+    for (const auto &r : ops.relLinerules.toNameRule) {
+      for (const auto &relAttr : rels.rels[relId]) {
+        if (relAttr.first == r) {
+          el.toStr = ops.statNormzer.norm(source->decode(relAttr.second));
+          if (!el.toStr.empty())
+            found = true;
+        }
+      }
+      if (found)
+        break;
+    }
+
+    found = false;
+    for (const auto &r : ops.relLinerules.colorRule) {
+      for (const auto &relAttr : rels.rels[relId]) {
+        if (relAttr.first == r) {
+          auto dec = source->decode(relAttr.second);
+          auto color = parseHexColor(dec);
+          if (color == ad::cppgtfs::gtfs::NO_COLOR)
+            color = parseHexColor(std::string("#") + dec);
+          if (color != ad::cppgtfs::gtfs::NO_COLOR) {
+            found = true;
+            el.color = color;
           }
         }
-        if (found)
-          break;
       }
+      if (found)
+        break;
+    }
 
-      found = false;
-      for (const auto &r : ops.relLinerules.fromNameRule) {
-        for (const auto &relAttr : rels.rels[relId]) {
-          if (relAttr.first == r) {
-            el.fromStr = ops.statNormzer.norm(source->decode(relAttr.second));
-            if (!el.fromStr.empty())
-              found = true;
-          }
-        }
-        if (found)
-          break;
-      }
+    if (!el.shortName.size() && !el.fromStr.size() && !el.toStr.size())
+      continue;
 
-      found = false;
-      for (const auto &r : ops.relLinerules.toNameRule) {
-        for (const auto &relAttr : rels.rels[relId]) {
-          if (relAttr.first == r) {
-            el.toStr = ops.statNormzer.norm(source->decode(relAttr.second));
-            if (!el.toStr.empty())
-              found = true;
-          }
-        }
-        if (found)
-          break;
-      }
-
-      found = false;
-      for (const auto &r : ops.relLinerules.colorRule) {
-        for (const auto &relAttr : rels.rels[relId]) {
-          if (relAttr.first == r) {
-            auto dec = source->decode(relAttr.second);
-            auto color = parseHexColor(dec);
-            if (color == ad::cppgtfs::gtfs::NO_COLOR)
-              color = parseHexColor(std::string("#") + dec);
-            if (color != ad::cppgtfs::gtfs::NO_COLOR) {
-              found = true;
-              el.color = color;
-            }
-          }
-        }
-        if (found)
-          break;
-      }
-
-      if (!el.shortName.size() && !el.fromStr.size() && !el.toStr.size())
-        continue;
-
-      if (_lines.count(el)) {
-        elp = _lines[el];
-        _relLines[relId] = elp;
+    {
+      std::lock_guard<std::mutex> lock(_linesMutex);
+      // Double check
+      if (_relLines.count(relId)) {
+        elp = _relLines[relId];
       } else {
-        elp = new TransitEdgeLine(el);
-        _lines[el] = elp;
-        _relLines[relId] = elp;
+        if (_lines.count(el)) {
+          elp = _lines[el];
+          _relLines[relId] = elp;
+        } else {
+          elp = new TransitEdgeLine(el);
+          _lines[el] = elp;
+          _relLines[relId] = elp;
+        }
       }
     }
     ret.push_back(elp);
@@ -1915,6 +1927,32 @@ const EdgePL &OsmBuilder::mergeEdgePL(Edge *a, Edge *b) {
 }
 
 // _____________________________________________________________________________
+// _____________________________________________________________________________
+template <typename Func> void parallel_nodes(Graph *g, Func func) {
+  std::vector<Node *> nodes(g->getNds().begin(), g->getNds().end());
+  int num_threads = std::thread::hardware_concurrency();
+  if (num_threads == 0)
+    num_threads = 1;
+
+  size_t chunk_size = nodes.size() / num_threads;
+  std::vector<std::thread> threads;
+
+  for (int i = 0; i < num_threads; ++i) {
+    threads.emplace_back([&, i]() {
+      size_t start = i * chunk_size;
+      size_t end = (i == num_threads - 1) ? nodes.size() : (i + 1) * chunk_size;
+      for (size_t j = start; j < end; ++j) {
+        func(nodes[j]);
+      }
+    });
+  }
+  for (auto &t : threads)
+    t.join();
+}
+
+// _____________________________________________________________________________
+// _____________________________________________________________________________
+// _____________________________________________________________________________
 void OsmBuilder::collapseEdges(Graph *g) {
   for (auto n : g->getNds()) {
     if (n->getOutDeg() + n->getInDeg() != 2 || n->pl().getSI() ||
@@ -1956,12 +1994,12 @@ void OsmBuilder::collapseEdges(Graph *g) {
 
 // _____________________________________________________________________________
 void OsmBuilder::simplifyGeoms(Graph *g) {
-  for (auto *n : g->getNds()) {
+  parallel_nodes(g, [&](Node *n) {
     for (auto *e : n->getAdjListOut()) {
       (*e->pl().getGeom()) =
           util::geo::simplify(*e->pl().getGeom(), 0.5 / M_PER_DEG);
     }
-  }
+  });
 }
 
 // _____________________________________________________________________________
@@ -2057,7 +2095,7 @@ void OsmBuilder::writeSelfEdgs(Graph *g) {
 
 // _____________________________________________________________________________
 void OsmBuilder::writeNoLinePens(Graph *g, const OsmReadOpts &opts) {
-  for (auto *n : g->getNds()) {
+  parallel_nodes(g, [&](Node *n) {
     for (auto *e : n->getAdjListOut()) {
       if (e->pl().getLines().size() == 0) {
         double c = e->pl().getCost();
@@ -2065,12 +2103,12 @@ void OsmBuilder::writeNoLinePens(Graph *g, const OsmReadOpts &opts) {
         e->pl().setCost(costToInt(c * opts.noLinesPunishFact));
       }
     }
-  }
+  });
 }
 
 // _____________________________________________________________________________
 void OsmBuilder::writeOneWayPens(Graph *g, const OsmReadOpts &opts) {
-  for (auto *n : g->getNds()) {
+  parallel_nodes(g, [&](Node *n) {
     for (auto *e : n->getAdjListOut()) {
       if (e->pl().oneWay() == 2) {
         double c = e->pl().getCost();
@@ -2079,7 +2117,7 @@ void OsmBuilder::writeOneWayPens(Graph *g, const OsmReadOpts &opts) {
             costToInt(c * opts.oneWaySpeedPen + opts.oneWayEntryCost));
       }
     }
-  }
+  });
 }
 
 // _____________________________________________________________________________
