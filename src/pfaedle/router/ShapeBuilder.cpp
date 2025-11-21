@@ -456,6 +456,7 @@ Stats ShapeBuilder::shapeify(pfaedle::netgraph::Graph *outNg) {
 
   auto tStart = TIME();
   std::atomic<size_t> at(0);
+  std::atomic<size_t> droppedTrips(0);
 
   size_t numThreads = std::thread::hardware_concurrency();
   std::vector<std::thread> thrds(numThreads);
@@ -464,8 +465,8 @@ Stats ShapeBuilder::shapeify(pfaedle::netgraph::Graph *outNg) {
 
   size_t i = 0;
   for (auto &t : thrds) {
-    t = std::thread(&ShapeBuilder::shapeWorker, this, &tries, &at, &shpUse,
-                    &colors[i], &gtfsGraphs[i]);
+    t = std::thread(&ShapeBuilder::shapeWorker, this, &tries, &at,
+                    &droppedTrips, &shpUse, &colors[i], &gtfsGraphs[i]);
     i++;
   }
 
@@ -473,11 +474,18 @@ Stats ShapeBuilder::shapeify(pfaedle::netgraph::Graph *outNg) {
     thr.join();
 
   stats.solveTime = TOOK_UNTIL(tStart, TIME());
+  stats.numDroppedTrips = droppedTrips;
 
   LOG(INFO) << "Matched " << stats.totNumTrips << " trips in " << std::fixed
             << std::setprecision(2) << (stats.solveTime / 1000000.0) << " ms ("
             << std::setprecision(1) << (stats.solveTime / 1000000000.0)
             << " s)";
+
+  if (stats.numDroppedTrips > 0) {
+    LOG(INFO)
+        << "Dropped " << stats.numDroppedTrips
+        << " trips because matching failed (too many straight line segments).";
+  }
 
   // merge colors
   for (auto &cols : colors) {
@@ -609,9 +617,9 @@ ShapeBuilder::getGtfsShape(const EdgeListHops &hops, Trip *t, size_t numOthers,
 
   // Heuristic: if more than 20% of segments are straight lines, drop the shape
   if (hops.size() > 0 && fallbackCount > hops.size() * 0.2) {
-    LOG(WARN) << "Dropping shape for trip " << t->getId()
-              << " because matching failed for " << fallbackCount << "/"
-              << hops.size() << " segments.";
+    // LOG(WARN) << "Dropping shape for trip " << t->getId()
+    //           << " because matching failed for " << fallbackCount << "/"
+    //           << hops.size() << " segments.";
     return ret; // Returns shape with no points, which will be ignored by
                 // setShape
   }
@@ -1324,7 +1332,7 @@ ShapeBuilder::getMeasure(const std::vector<LINE> &lines) const {
 // _____________________________________________________________________________
 void ShapeBuilder::shapeWorker(
     const std::vector<const TripForest *> *tries, std::atomic<size_t> *at,
-    std::map<std::string, size_t> *shpUse,
+    std::atomic<size_t> *droppedTrips, std::map<std::string, size_t> *shpUse,
     std::map<Route *, std::map<uint32_t, std::vector<gtfs::Trip *>>>
         *routeColors,
     TrGraphEdgs *gtfsGraph) {
@@ -1391,6 +1399,7 @@ void ShapeBuilder::shapeWorker(
             setShape(t, shp, distances);
           } else {
             t->setShape(std::string(""));
+            (*droppedTrips)++;
           }
         }
       }
