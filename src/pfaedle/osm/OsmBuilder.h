@@ -4,6 +4,7 @@
 
 #ifndef PFAEDLE_OSM_OSMBUILDER_H_
 #define PFAEDLE_OSM_OSMBUILDER_H_
+#include <functional>
 #include <map>
 #include <queue>
 #include <set>
@@ -88,7 +89,8 @@ public:
   // Read the OSM file at path, and write a graph to g. Only elements
   // inside the bounding box will be read
   void read(const std::string &path, const OsmReadOpts &opts, Graph *g,
-            const BBoxIdx &box, double gridSize, Restrictor *res);
+            const BBoxIdx &box, double gridSize, Restrictor *res,
+            std::function<bool(size_t)> checkSmartSkip = nullptr);
 
   // Based on the list of options, output an overpass XML query for getting
   // the data needed for routing
@@ -108,6 +110,9 @@ public:
                    const std::vector<OsmReadOpts> &opts, const BBoxIdx &box);
 
 private:
+  void readImpl(source::OsmSource *source, const OsmReadOpts &opts, Graph *g,
+                const BBoxIdx &box, double gridSize, Restrictor *res);
+
   void readBBoxNds(source::OsmSource *source, OsmIdSet *nodes,
                    OsmIdSet *noHupNodes, const OsmFilter &filter,
                    const BBoxIdx &bbox) const;

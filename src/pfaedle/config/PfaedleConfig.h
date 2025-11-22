@@ -20,28 +20,14 @@ using ad::cppgtfs::gtfs::Route;
 
 struct Config {
   Config()
-      : dbgOutputPath("."),
-        solveMethod("global"),
-        outputPath("gtfs-out"),
-        dropShapes(false),
-        useHMM(false),
-        writeGraph(false),
-        buildTransitGraph(false),
-        useCaching(false),
-        writeOverpass(false),
-        writeOsmfilter(false),
-        inPlace(false),
-        writeColors(false),
-        noFastHops(false),
-        noAStar(false),
-        noTrie(false),
-        noHopCache(false),
-        writeStats(false),
-        parseAdditionalGTFSFields(false),
-        gridSize(2000 / util::geo::M_PER_DEG),
-        boxPadding(20000),
-        gaussianNoise(0),
-        verbosity(0) {}
+      : dbgOutputPath("."), solveMethod("global"), outputPath("gtfs-out"),
+        dropShapes(false), useHMM(false), writeGraph(false),
+        buildTransitGraph(false), useCaching(false), writeOverpass(false),
+        writeOsmfilter(false), inPlace(false), writeColors(false),
+        noFastHops(false), noAStar(false), noTrie(false), noHopCache(false),
+        writeStats(false), parseAdditionalGTFSFields(false),
+        gridSize(2000 / util::geo::M_PER_DEG), boxPadding(20000),
+        gaussianNoise(0), verbosity(0), smartShapeDrop(false) {}
   std::string dbgOutputPath;
   std::string solveMethod;
   std::string shapeTripId;
@@ -71,6 +57,7 @@ struct Config {
   double boxPadding;
   double gaussianNoise;
   uint8_t verbosity;
+  bool smartShapeDrop;
 
   std::string toString() {
     std::stringstream ss;
@@ -96,21 +83,22 @@ struct Config {
        << "verbosity: " << verbosity << "\n"
        << "parse-additional-gtfs-fields: " << parseAdditionalGTFSFields << "\n"
        << "write-stats: " << writeStats << "\n"
+       << "smart-shape-drop: " << smartShapeDrop << "\n"
        << "feed-paths: ";
 
-    for (const auto& p : feedPaths) {
+    for (const auto &p : feedPaths) {
       ss << p << " ";
     }
 
     ss << "\nconfig-paths: ";
 
-    for (const auto& p : configPaths) {
+    for (const auto &p : configPaths) {
       ss << p << " ";
     }
 
     ss << "\nmots: ";
 
-    for (const auto& mot : mots) {
+    for (const auto &mot : mots) {
       ss << mot << " ";
     }
 
@@ -120,7 +108,7 @@ struct Config {
   }
 };
 
-}  // namespace config
-}  // namespace pfaedle
+} // namespace config
+} // namespace pfaedle
 
-#endif  // PFAEDLE_CONFIG_PFAEDLECONFIG_H_
+#endif // PFAEDLE_CONFIG_PFAEDLECONFIG_H_

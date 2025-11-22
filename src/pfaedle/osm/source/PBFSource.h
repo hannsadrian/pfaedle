@@ -72,6 +72,9 @@ public:
   // Get node location from the index
   bool getNodeLocation(osmid id, double *lat, double *lon) const;
 
+  // Get the size of the location index (number of nodes)
+  size_t getLocationIndexSize() const;
+
 private:
   std::string _path;
   std::unique_ptr<osmium::io::Reader> _reader;

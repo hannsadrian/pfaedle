@@ -2,18 +2,18 @@
 // Chair of Algorithms and Data Structures.
 // Authors: Patrick Brosi <brosi@informatik.uni-freiburg.de>
 
-#include <float.h>
-#include <getopt.h>
-#include <exception>
-#include <iostream>
-#include <string>
+#include "pfaedle/config/ConfigReader.h"
 #include "pfaedle/Def.h"
 #include "pfaedle/_config.h"
-#include "pfaedle/config/ConfigReader.h"
 #include "pfaedle/config/PfaedleConfig.h"
 #include "util/String.h"
 #include "util/geo/Geo.h"
 #include "util/log/Log.h"
+#include <exception>
+#include <float.h>
+#include <getopt.h>
+#include <iostream>
+#include <string>
 
 using pfaedle::config::ConfigReader;
 
@@ -21,13 +21,13 @@ using std::exception;
 using std::string;
 using std::vector;
 
-static const char* YEAR = &__DATE__[7];
-static const char* COPY =
+static const char *YEAR = &__DATE__[7];
+static const char *COPY =
     "University of Freiburg - Chair of Algorithms and Data Structures";
-static const char* AUTHORS = "Patrick Brosi <brosi@informatik.uni-freiburg.de>";
+static const char *AUTHORS = "Patrick Brosi <brosi@informatik.uni-freiburg.de>";
 
 // _____________________________________________________________________________
-void ConfigReader::help(const char* bin) {
+void ConfigReader::help(const char *bin) {
   std::cout << std::setfill(' ') << std::left << "pfaedle GTFS map matcher "
             << VERSION_FULL << "\n(built " << __DATE__ << " " << __TIME__
             << " with geometry precision <" << PFDL_PREC_STR << ">)\n\n"
@@ -44,6 +44,10 @@ void ConfigReader::help(const char* bin) {
             << "drop shapes already present in the feed and\n"
             << std::setw(35) << " "
             << "  recalculate them\n"
+            << std::setw(35) << "  -S [ --smart-shape-drop ]"
+            << "drop shapes only if dataset is small or\n"
+            << std::setw(35) << " "
+            << "  shapes are missing (>20%)\n"
             << std::setw(35) << "  --write-colors"
             << "write matched route line colors, where missing\n"
             << "\nInput:\n"
@@ -122,7 +126,7 @@ void ConfigReader::help(const char* bin) {
 }
 
 // _____________________________________________________________________________
-void ConfigReader::read(Config* cfg, int argc, char** argv) {
+void ConfigReader::read(Config *cfg, int argc, char **argv) {
   std::string motStr = "all";
   bool printOpts = false;
 
@@ -131,6 +135,7 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
                          {"config", required_argument, 0, 'c'},
                          {"osm-file", required_argument, 0, 'x'},
                          {"drop-shapes", required_argument, 0, 'D'},
+                         {"smart-shape-drop", no_argument, 0, 'S'},
                          {"mots", required_argument, NULL, 'm'},
                          {"grid-size", required_argument, 0, 'g'},
                          {"box-padding", required_argument, 0, 'b'},
@@ -156,117 +161,122 @@ void ConfigReader::read(Config* cfg, int argc, char** argv) {
                          {0, 0, 0, 0}};
 
   int c;
-  while ((c = getopt_long(argc, argv, ":o:hvi:c:x:Dm:g:X:T:d:pP:FWb:", ops, 0)) !=
-         -1) {
+  while ((c = getopt_long(argc, argv, ":o:hvi:c:x:DSm:g:X:T:d:pP:FWb:", ops,
+                          0)) != -1) {
     switch (c) {
-      case 1:
-        cfg->writeGraph = true;
-        break;
-      case 4:
-        cfg->buildTransitGraph = true;
-        break;
-      case 10:
-        cfg->noFastHops = true;
-        break;
-      case 11:
-        cfg->noAStar = true;
-        break;
-      case 12:
-        cfg->noTrie = true;
-        break;
-      case 'o':
-        cfg->outputPath = optarg;
-        break;
-      case 'i':
-        cfg->feedPaths.push_back(optarg);
-        break;
-      case 'c':
-        cfg->configPaths.push_back(optarg);
-        break;
-      case 'x':
-        cfg->osmPath = optarg;
-        break;
-      case 'D':
-        cfg->dropShapes = true;
-        break;
-      case 'm':
-        motStr = optarg;
-        break;
-      case 'g':
-        cfg->gridSize = atof(optarg) / util::geo::M_PER_DEG;
-        break;
-      case 'b':
-        cfg->boxPadding = atof(optarg);
-        break;
-      case 'X':
-        cfg->writeOsm = optarg;
-        break;
-      case 'T':
-        cfg->shapeTripId = optarg;
-        break;
-      case 'P':
-        cfg->motCfgParam += std::string("\n") + optarg;
-        break;
-      case 'd':
-        cfg->dbgOutputPath = optarg;
-        break;
-      case 'a':
-        cfg->writeOverpass = true;
-        break;
-      case 'f':
-        cfg->writeOsmfilter = true;
-        break;
-      case 9:
-        cfg->inPlace = true;
-        break;
-      case 13:
-        cfg->writeColors = true;
-        break;
-      case 14:
-        cfg->writeStats = true;
-        break;
-      case 15:
-        cfg->noHopCache = true;
-        break;
-      case 16:
-        cfg->gaussianNoise = atof(optarg);
-        break;
-      case 'W':
-        cfg->verbosity = 1;
-        break;
-      case 'F':
-        cfg->parseAdditionalGTFSFields = true;
-        break;
-      case 'v':
-        std::cout << "pfaedle " << VERSION_FULL << std::endl;
-        exit(0);
-      case 'p':
-        printOpts = true;
-        break;
-      case 'h':
-        help(argv[0]);
-        exit(0);
-      case ':':
-        std::cerr << argv[optind - 1];
-        std::cerr << " requires an argument" << std::endl;
-        exit(1);
-      case '?':
-        std::cerr << argv[optind - 1];
-        std::cerr << " option unknown" << std::endl;
-        exit(1);
-        break;
-      default:
-        std::cerr << "Error while parsing arguments" << std::endl;
-        exit(1);
-        break;
+    case 1:
+      cfg->writeGraph = true;
+      break;
+    case 4:
+      cfg->buildTransitGraph = true;
+      break;
+    case 10:
+      cfg->noFastHops = true;
+      break;
+    case 11:
+      cfg->noAStar = true;
+      break;
+    case 12:
+      cfg->noTrie = true;
+      break;
+    case 'o':
+      cfg->outputPath = optarg;
+      break;
+    case 'i':
+      cfg->feedPaths.push_back(optarg);
+      break;
+    case 'c':
+      cfg->configPaths.push_back(optarg);
+      break;
+    case 'x':
+      cfg->osmPath = optarg;
+      break;
+    case 'D':
+      cfg->dropShapes = true;
+      break;
+    case 'S':
+      cfg->smartShapeDrop = true;
+      cfg->dropShapes = true;
+      break;
+    case 'm':
+      motStr = optarg;
+      break;
+    case 'g':
+      cfg->gridSize = atof(optarg) / util::geo::M_PER_DEG;
+      break;
+    case 'b':
+      cfg->boxPadding = atof(optarg);
+      break;
+    case 'X':
+      cfg->writeOsm = optarg;
+      break;
+    case 'T':
+      cfg->shapeTripId = optarg;
+      break;
+    case 'P':
+      cfg->motCfgParam += std::string("\n") + optarg;
+      break;
+    case 'd':
+      cfg->dbgOutputPath = optarg;
+      break;
+    case 'a':
+      cfg->writeOverpass = true;
+      break;
+    case 'f':
+      cfg->writeOsmfilter = true;
+      break;
+    case 9:
+      cfg->inPlace = true;
+      break;
+    case 13:
+      cfg->writeColors = true;
+      break;
+    case 14:
+      cfg->writeStats = true;
+      break;
+    case 15:
+      cfg->noHopCache = true;
+      break;
+    case 16:
+      cfg->gaussianNoise = atof(optarg);
+      break;
+    case 'W':
+      cfg->verbosity = 1;
+      break;
+    case 'F':
+      cfg->parseAdditionalGTFSFields = true;
+      break;
+    case 'v':
+      std::cout << "pfaedle " << VERSION_FULL << std::endl;
+      exit(0);
+    case 'p':
+      printOpts = true;
+      break;
+    case 'h':
+      help(argv[0]);
+      exit(0);
+    case ':':
+      std::cerr << argv[optind - 1];
+      std::cerr << " requires an argument" << std::endl;
+      exit(1);
+    case '?':
+      std::cerr << argv[optind - 1];
+      std::cerr << " option unknown" << std::endl;
+      exit(1);
+      break;
+    default:
+      std::cerr << "Error while parsing arguments" << std::endl;
+      exit(1);
+      break;
     }
   }
 
-  for (int i = optind; i < argc; i++) cfg->feedPaths.push_back(argv[i]);
+  for (int i = optind; i < argc; i++)
+    cfg->feedPaths.push_back(argv[i]);
 
   auto v = util::split(motStr, ',');
-  for (const auto& motStr : v) {
-    const auto& mots =
+  for (const auto &motStr : v) {
+    const auto &mots =
         ad::cppgtfs::gtfs::flat::Route::getTypesFromString(util::trim(motStr));
     cfg->mots.insert(mots.begin(), mots.end());
   }

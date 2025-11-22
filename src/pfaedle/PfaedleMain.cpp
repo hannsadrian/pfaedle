@@ -10,9 +10,15 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#ifdef LIBZIP_FOUND
+#include <zip.h>
+#endif
+
 #include <clocale>
 #include <fstream>
 #include <map>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -69,11 +75,11 @@ using pfaedle::statsimiclassifier::JaccardClassifier;
 using pfaedle::statsimiclassifier::JaccardGeodistClassifier;
 using pfaedle::statsimiclassifier::PEDClassifier;
 using pfaedle::statsimiclassifier::StatsimiClassifier;
-using util::WARN;
-using util::INFO;
-using util::ERROR;
 using util::DEBUG;
+using util::ERROR;
+using util::INFO;
 using util::VDEBUG;
+using util::WARN;
 
 enum class RetCode {
   SUCCESS = 0,
@@ -88,19 +94,19 @@ enum class RetCode {
   NO_MOT_CFG = 9
 };
 
-std::string getFileNameMotStr(const MOTs& mots);
-std::vector<std::string> getCfgPaths(const Config& cfg);
+std::string getFileNameMotStr(const MOTs &mots);
+std::vector<std::string> getCfgPaths(const Config &cfg);
 
 // _____________________________________________________________________________
 void gtfsWarnCb(std::string msg) { LOG(WARN) << msg; }
 
 // _____________________________________________________________________________
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   // disable output buffering for standard output
   setbuf(stdout, NULL);
 
   // initialize randomness
-  srand(time(NULL) + rand());  // NOLINT
+  srand(time(NULL) + rand()); // NOLINT
 
   // use utf8 locale
   std::setlocale(LC_ALL, "en_US.utf8");
@@ -119,7 +125,7 @@ int main(int argc, char** argv) {
 
   try {
     motCfgReader.parse(cfgPaths, cfg.motCfgParam);
-  } catch (const configparser::ParseExc& ex) {
+  } catch (const configparser::ParseExc &ex) {
     LOG(ERROR) << "Could not parse MOT configurations, reason was:";
     std::cerr << ex.what() << std::endl;
     exit(static_cast<int>(RetCode::MOT_CFG_PARSE_ERR));
@@ -139,7 +145,8 @@ int main(int argc, char** argv) {
   T_START(gtfsBuild);
 
   if (cfg.feedPaths.size() == 1) {
-    if (cfg.inPlace) cfg.outputPath = cfg.feedPaths[0];
+    if (cfg.inPlace)
+      cfg.outputPath = cfg.feedPaths[0];
     if (!cfg.writeOverpass && !cfg.writeOsmfilter)
       LOG(INFO) << "Reading GTFS feed " << cfg.feedPaths[0] << " ...";
     try {
@@ -147,7 +154,7 @@ int main(int argc, char** argv) {
                             cfg.parseAdditionalGTFSFields,
                             cfg.verbosity ? gtfsWarnCb : 0);
       p.parse(&gtfs[0]);
-    } catch (const ad::cppgtfs::ParserException& ex) {
+    } catch (const ad::cppgtfs::ParserException &ex) {
       LOG(ERROR) << "Could not parse input GTFS feed, reason was:";
       std::cerr << ex.what() << std::endl;
       exit(static_cast<int>(RetCode::GTFS_PARSE_ERR));
@@ -159,7 +166,7 @@ int main(int argc, char** argv) {
       try {
         ad::cppgtfs::Parser p(cfg.feedPaths[i]);
         p.parse(&gtfs[i]);
-      } catch (const ad::cppgtfs::ParserException& ex) {
+      } catch (const ad::cppgtfs::ParserException &ex) {
         LOG(ERROR) << "Could not parse input GTFS feed, reason was:";
         std::cerr << ex.what() << std::endl;
         exit(static_cast<int>(RetCode::GTFS_PARSE_ERR));
@@ -175,7 +182,7 @@ int main(int argc, char** argv) {
   LOG(DEBUG) << "Read " << motCfgReader.getConfigs().size()
              << " unique MOT configs.";
   MOTs cmdCfgMots = cfg.mots;
-  pfaedle::gtfs::Trip* singleTrip = 0;
+  pfaedle::gtfs::Trip *singleTrip = 0;
 
   if (cfg.shapeTripId.size()) {
     if (!cfg.feedPaths.size()) {
@@ -190,7 +197,7 @@ int main(int argc, char** argv) {
   }
 
   double maxSpeed = 0;
-  for (const auto& c : motCfgReader.getConfigs()) {
+  for (const auto &c : motCfgReader.getConfigs()) {
     if (c.osmBuildOpts.maxSpeed > maxSpeed) {
       maxSpeed = c.osmBuildOpts.maxSpeed;
     }
@@ -206,7 +213,7 @@ int main(int argc, char** argv) {
     }
     OsmBuilder osmBuilder;
     std::vector<pfaedle::osm::OsmReadOpts> opts;
-    for (const auto& o : motCfgReader.getConfigs()) {
+    for (const auto &o : motCfgReader.getConfigs()) {
       if (std::find_first_of(o.mots.begin(), o.mots.end(), cmdCfgMots.begin(),
                              cmdCfgMots.end()) != o.mots.end()) {
         opts.push_back(o.osmBuildOpts);
@@ -214,7 +221,7 @@ int main(int argc, char** argv) {
     }
     try {
       osmBuilder.filterWrite(cfg.osmPath, cfg.writeOsm, opts, box);
-    } catch (const pfxml::parse_exc& ex) {
+    } catch (const pfxml::parse_exc &ex) {
       LOG(ERROR) << "Could not parse OSM data, reason was:";
       std::cerr << ex.what() << std::endl;
       exit(static_cast<int>(RetCode::OSM_PARSE_ERR));
@@ -228,7 +235,7 @@ int main(int argc, char** argv) {
     }
     OsmBuilder osmBuilder;
     std::vector<pfaedle::osm::OsmReadOpts> opts;
-    for (const auto& o : motCfgReader.getConfigs()) {
+    for (const auto &o : motCfgReader.getConfigs()) {
       if (std::find_first_of(o.mots.begin(), o.mots.end(), cmdCfgMots.begin(),
                              cmdCfgMots.end()) != o.mots.end()) {
         opts.push_back(o.osmBuildOpts);
@@ -240,7 +247,7 @@ int main(int argc, char** argv) {
     BBoxIdx box(cfg.boxPadding);
     OsmBuilder osmBuilder;
     std::vector<pfaedle::osm::OsmReadOpts> opts;
-    for (const auto& o : motCfgReader.getConfigs()) {
+    for (const auto &o : motCfgReader.getConfigs()) {
       if (std::find_first_of(o.mots.begin(), o.mots.end(), cmdCfgMots.begin(),
                              cmdCfgMots.end()) != o.mots.end()) {
         opts.push_back(o.osmBuildOpts);
@@ -258,10 +265,11 @@ int main(int argc, char** argv) {
   std::map<std::string, std::pair<size_t, size_t>> graphDimensions;
   std::vector<double> hopDists;
 
-  for (const auto& motCfg : motCfgReader.getConfigs()) {
+  for (const auto &motCfg : motCfgReader.getConfigs()) {
     std::string filePost;
     auto usedMots = pfaedle::router::motISect(motCfg.mots, cmdCfgMots);
-    if (!usedMots.size()) continue;
+    if (!usedMots.size())
+      continue;
     if (singleTrip && !usedMots.count(singleTrip->getRoute()->getType()))
       continue;
     if (motCfgReader.getConfigs().size() > 1)
@@ -286,26 +294,313 @@ int main(int argc, char** argv) {
       T_START(osmBuild);
 
       // Determine which OSM file to use for this MOT
-      std::string osmPath = cfg.osmPath;  // Default from command line
-      
+      std::string osmPath = cfg.osmPath; // Default from command line
+
       if (!motCfg.osmPath.empty()) {
         // MOT-specific OSM file configured in pfaedle.cfg
         osmPath = motCfg.osmPath;
         LOG(INFO) << "Using MOT-specific OSM file: " << osmPath;
       }
 
+      auto checkSmartSkip = [&](size_t nodeCount) {
+        if (!cfg.smartShapeDrop)
+          return false;
+        if (nodeCount < 5000000)
+          return false;
+
+        // Sample shapes by reading shapes.txt (handles both directories and
+        // zips) We sample first 50 unique shapes
+        LOG(INFO) << "Analyzing shape quality (sampling from shapes.txt)...";
+
+        const size_t MAX_SHAPES_TO_SAMPLE = 50;
+        std::unordered_map<std::string, size_t> sampledShapePoints;
+        std::unordered_map<std::string, size_t> shapeToStopCount;
+
+        // First pass: build map of shape_id -> typical stop count
+        std::set<std::string> allShapeIds;
+        for (const auto &trip : gtfs[0].getTrips()) {
+          if (usedMots.count(trip.getRoute()->getType())) {
+            if (!trip.getShape().empty()) {
+              allShapeIds.insert(trip.getShape());
+              size_t stops = trip.getStopTimes().size();
+              auto &existing = shapeToStopCount[trip.getShape()];
+              if (existing == 0 || stops > existing) {
+                existing = stops; // Keep the max stop count for this shape
+              }
+            }
+          }
+        }
+
+        // Read shapes.txt from zip or directory
+        std::string feedPath = cfg.feedPaths[0];
+        bool isZip = (feedPath.size() > 4 &&
+                      feedPath.substr(feedPath.size() - 4) == ".zip");
+
+        std::set<std::string> sampledShapeIds;
+        int shapeIdIdx = -1;
+        bool headerParsed = false;
+
+#ifdef LIBZIP_FOUND
+        if (isZip) {
+          LOG(INFO) << "Reading shapes.txt from ZIP: " << feedPath;
+          int err = 0;
+          zip *za = zip_open(feedPath.c_str(), ZIP_RDONLY, &err);
+          if (za) {
+            zip_file *zf = zip_fopen(za, "shapes.txt", 0);
+            if (zf) {
+              char buffer[8192];
+              std::string remainder;
+              zip_int64_t bytesRead;
+
+              while (sampledShapeIds.size() < MAX_SHAPES_TO_SAMPLE &&
+                     (bytesRead = zip_fread(zf, buffer, sizeof(buffer))) > 0) {
+                remainder.append(buffer, bytesRead);
+
+                std::stringstream ss(remainder);
+                std::string line;
+
+                while (std::getline(ss, line)) {
+                  // Check if we have a complete line (getline consumes
+                  // delimiter) If the stream is not at EOF, or if the last char
+                  // was a delimiter, it's a complete line. However,
+                  // stringstream logic is a bit tricky with chunks. Easier
+                  // approach: find last newline in remainder, process up to
+                  // there. But let's stick to a simpler buffer logic for now.
+                }
+                // Actually, let's use find('\n') manually
+                size_t pos = 0;
+                size_t newlinePos;
+                while ((newlinePos = remainder.find('\n', pos)) !=
+                       std::string::npos) {
+                  std::string line = remainder.substr(pos, newlinePos - pos);
+                  if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+
+                  if (!headerParsed) {
+                    // Parse Header
+                    std::stringstream lss(line);
+                    std::string col;
+                    int idx = 0;
+                    while (std::getline(lss, col, ',')) {
+                      if (idx == 0 && col.size() > 3 &&
+                          col.substr(0, 3) == "\xEF\xBB\xBF")
+                        col = col.substr(3);
+                      if (col == "shape_id") {
+                        shapeIdIdx = idx;
+                        break;
+                      }
+                      idx++;
+                    }
+                    if (shapeIdIdx == -1)
+                      shapeIdIdx = 0; // Fallback to first column
+                    headerParsed = true;
+                  } else {
+                    // Parse Data
+                    std::string shapeId;
+                    int currentIdx = 0;
+                    size_t start = 0;
+                    size_t end = line.find(',');
+                    while (end != std::string::npos) {
+                      if (currentIdx == shapeIdIdx) {
+                        shapeId = line.substr(start, end - start);
+                        break;
+                      }
+                      start = end + 1;
+                      end = line.find(',', start);
+                      currentIdx++;
+                    }
+                    if (currentIdx == shapeIdIdx && shapeId.empty())
+                      shapeId = line.substr(start);
+
+                    if (!shapeId.empty() && allShapeIds.count(shapeId)) {
+                      sampledShapePoints[shapeId]++;
+                      sampledShapeIds.insert(shapeId);
+                    }
+                  }
+
+                  pos = newlinePos + 1;
+                  if (sampledShapeIds.size() >= MAX_SHAPES_TO_SAMPLE)
+                    break;
+                }
+                remainder = remainder.substr(pos);
+              }
+              zip_fclose(zf);
+            } else {
+              LOG(WARN) << "Could not open shapes.txt in zip: " << feedPath;
+            }
+            zip_close(za);
+          } else {
+            LOG(WARN) << "Could not open zip file: " << feedPath;
+          }
+        } else
+#endif
+        {
+          // Read from directory
+          std::string shapesPath = feedPath + "/shapes.txt";
+          std::ifstream shapesFile(shapesPath);
+
+          if (shapesFile.is_open()) {
+            std::string line;
+            if (std::getline(shapesFile, line)) {
+              if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+              // Parse Header
+              std::stringstream lss(line);
+              std::string col;
+              int idx = 0;
+              while (std::getline(lss, col, ',')) {
+                if (idx == 0 && col.size() > 3 &&
+                    col.substr(0, 3) == "\xEF\xBB\xBF")
+                  col = col.substr(3);
+                if (col == "shape_id") {
+                  shapeIdIdx = idx;
+                  break;
+                }
+                idx++;
+              }
+              if (shapeIdIdx == -1)
+                shapeIdIdx = 0;
+
+              while (std::getline(shapesFile, line) &&
+                     sampledShapeIds.size() < MAX_SHAPES_TO_SAMPLE) {
+                if (!line.empty() && line.back() == '\r')
+                  line.pop_back();
+
+                std::string shapeId;
+                int currentIdx = 0;
+                size_t start = 0;
+                size_t end = line.find(',');
+                while (end != std::string::npos) {
+                  if (currentIdx == shapeIdIdx) {
+                    shapeId = line.substr(start, end - start);
+                    break;
+                  }
+                  start = end + 1;
+                  end = line.find(',', start);
+                  currentIdx++;
+                }
+                if (currentIdx == shapeIdIdx && shapeId.empty())
+                  shapeId = line.substr(start);
+
+                if (!shapeId.empty() && allShapeIds.count(shapeId)) {
+                  sampledShapePoints[shapeId]++;
+                  sampledShapeIds.insert(shapeId);
+                }
+              }
+            }
+            shapesFile.close();
+          } else {
+            LOG(WARN) << "Could not open shapes.txt at: " << shapesPath;
+          }
+        }
+
+        LOG(INFO) << "Sampled " << sampledShapeIds.size()
+                  << " shapes from shapes.txt";
+
+        // Analyze sampled shapes: calculate average point-to-stop ratio
+        size_t detailedShapes = 0;
+        size_t dummyShapes = 0;
+        double totalRatio = 0;
+        size_t analyzedShapes = 0;
+
+        for (const auto &entry : sampledShapePoints) {
+          const std::string &shapeId = entry.first;
+          size_t points = entry.second;
+
+          if (shapeToStopCount.count(shapeId)) {
+            size_t stops = shapeToStopCount[shapeId];
+            double ratio = (double)points / stops;
+            totalRatio += ratio;
+            analyzedShapes++;
+
+            if (ratio > 5) {
+              detailedShapes++;
+            } else {
+              dummyShapes++;
+            }
+
+            if (analyzedShapes <= 3) {
+              LOG(INFO) << "Sample shape '" << shapeId << "': " << points
+                        << " points / " << stops << " stops = ratio " << ratio;
+            }
+          }
+        }
+
+        double avgRatio = analyzedShapes > 0 ? totalRatio / analyzedShapes : 0;
+        LOG(INFO) << "Shape quality analysis: detailed=" << detailedShapes
+                  << " dummy=" << dummyShapes << " avg_ratio=" << avgRatio;
+
+        // Decision: if >60% of sampled shapes are detailed, consider the feed
+        // good If we couldn't sample any shapes (ShapeContainer doesn't store
+        // input points), assume shapes are good if coverage is high
+        // (conservative approach)
+        bool hasDetailedShapes = false;
+        if (analyzedShapes > 0) {
+          hasDetailedShapes = (detailedShapes * 100 / analyzedShapes) > 60;
+        } else {
+          // Couldn't sample - assume shapes are detailed if high coverage
+          // exists This is safer: we preserve existing shapes unless we have
+          // evidence they're bad
+          hasDetailedShapes = true;
+          LOG(INFO) << "Could not sample shapes (input not stored), assuming "
+                       "they are detailed";
+        }
+
+        // Note: ShapeContainer doesn't store input shape points (only IDs),
+        // so we can't analyze point counts. Instead, we check if trips have
+        // shapes.
+        LOG(INFO) << "Analyzing shape coverage...";
+
+        size_t totalTrips = 0;
+        size_t tripsWithShapes = 0;
+        for (const auto &trip : gtfs[0].getTrips()) {
+          if (usedMots.count(trip.getRoute()->getType())) {
+            totalTrips++;
+            if (!trip.getShape().empty()) {
+              tripsWithShapes++;
+            }
+          }
+        }
+
+        if (totalTrips == 0)
+          return false;
+        double coverage = (double)tripsWithShapes / totalTrips;
+
+        LOG(INFO) << "Smart Shape Drop Check: " << tripsWithShapes << "/"
+                  << totalTrips << " trips have shapes (" << (coverage * 100)
+                  << "%). "
+                  << (hasDetailedShapes ? "Shapes appear DETAILED"
+                                        : "Shapes appear DUMMY/SIMPLE");
+
+        if (coverage > 0.2 && hasDetailedShapes) {
+          LOG(INFO) << "Large dataset (" << nodeCount
+                    << " nodes) and sufficient quality shape coverage ("
+                    << (coverage * 100)
+                    << "%). Skipping OSM processing and using existing shapes.";
+          cfg.dropShapes = false;
+          return true;
+        }
+        return false;
+      };
+
       if (fStops.size())
-        osmBuilder.read(osmPath, motCfg.osmBuildOpts, &graph, box,
-                        cfg.gridSize, &restr);
+        osmBuilder.read(osmPath, motCfg.osmBuildOpts, &graph, box, cfg.gridSize,
+                        &restr, checkSmartSkip);
+
+      if (graph.getNds().empty() && !cfg.dropShapes) {
+        LOG(INFO) << "Graph is empty and drop-shapes disabled. Skipping map "
+                     "matching.";
+        continue;
+      }
 
       tOsmBuild += T_STOP(osmBuild);
       graphDimensions[filePost].first = graph.getNds().size();
 
-      for (const auto& nd : graph.getNds()) {
+      for (const auto &nd : graph.getNds()) {
         graphDimensions[filePost].second += nd->getAdjListOut().size();
       }
 
-      StatsimiClassifier* statsimiClassifier;
+      StatsimiClassifier *statsimiClassifier;
 
       if (motCfg.routingOpts.statsimiMethod == "bts") {
         statsimiClassifier = new BTSClassifier();
@@ -323,7 +618,7 @@ int main(int argc, char** argv) {
         exit(1);
       }
 
-      Router* router = 0;
+      Router *router = 0;
 
       if (motCfg.routingOpts.transPenMethod == "exp") {
         if (cfg.noAStar)
@@ -369,8 +664,10 @@ int main(int argc, char** argv) {
         stats += shapeBuilder.shapeify(&ng);
       }
 
-      if (router) delete router;
-      if (statsimiClassifier) delete statsimiClassifier;
+      if (router)
+        delete router;
+      if (statsimiClassifier)
+        delete statsimiClassifier;
 
       if (cfg.writeGraph) {
         LOG(INFO) << "Outputting graph.json...";
@@ -381,7 +678,8 @@ int main(int argc, char** argv) {
         fstr.close();
       }
 
-      if (singleTrip) exit(static_cast<int>(RetCode::SUCCESS));
+      if (singleTrip)
+        exit(static_cast<int>(RetCode::SUCCESS));
 
       if (cfg.buildTransitGraph) {
         util::geo::output::GeoGraphJsonOutput out;
@@ -392,7 +690,7 @@ int main(int argc, char** argv) {
         out.print(ng, fstr);
         fstr.close();
       }
-    } catch (const pfxml::parse_exc& ex) {
+    } catch (const pfxml::parse_exc &ex) {
       LOG(ERROR) << "Could not parse OSM data, reason was:";
       std::cerr << ex.what() << std::endl;
       exit(static_cast<int>(RetCode::OSM_PARSE_ERR));
@@ -406,7 +704,7 @@ int main(int argc, char** argv) {
     double numNodesTot = 0;
     double numEdgesTot = 0;
 
-    for (const auto& gd : graphDimensions) {
+    for (const auto &gd : graphDimensions) {
       util::json::Dict a;
       a["num_nodes"] = gd.second.first;
       a["num_edges"] = gd.second.second;
@@ -416,7 +714,8 @@ int main(int argc, char** argv) {
     }
 
     double hopDistSum = 0;
-    for (auto d : hopDists) hopDistSum += d;
+    for (auto d : hopDists)
+      hopDistSum += d;
 
     util::json::Dict jsonStats = {
         {"statistics",
@@ -449,7 +748,7 @@ int main(int argc, char** argv) {
       LOG(INFO) << "Writing output GTFS to " << cfg.outputPath << " ...";
       pfaedle::gtfs::Writer w;
       w.write(&gtfs[0], cfg.outputPath);
-    } catch (const ad::cppgtfs::WriterException& ex) {
+    } catch (const ad::cppgtfs::WriterException &ex) {
       LOG(ERROR) << "Could not write output GTFS feed, reason was:";
       std::cerr << ex.what() << std::endl;
       exit(static_cast<int>(RetCode::GTFS_WRITE_ERR));
@@ -460,7 +759,7 @@ int main(int argc, char** argv) {
 }
 
 // _____________________________________________________________________________
-std::string getFileNameMotStr(const MOTs& mots) {
+std::string getFileNameMotStr(const MOTs &mots) {
   MOTs tmp = mots;
   std::string motStr;
 
@@ -468,19 +767,22 @@ std::string getFileNameMotStr(const MOTs& mots) {
                            "ferry", "cablecar",   "gondola", "funicular",
                            "coach", "trolleybus", "monorail"};
 
-  for (const auto& n : names) {
-    const auto& types = ad::cppgtfs::gtfs::flat::Route::getTypesFromString(n);
-    const auto& isect = pfaedle::router::motISect(tmp, types);
+  for (const auto &n : names) {
+    const auto &types = ad::cppgtfs::gtfs::flat::Route::getTypesFromString(n);
+    const auto &isect = pfaedle::router::motISect(tmp, types);
 
     if (isect.size() == types.size()) {
-      if (motStr.size()) motStr += "-";
+      if (motStr.size())
+        motStr += "-";
       motStr += n;
-      for (const auto& mot : isect) tmp.erase(mot);
+      for (const auto &mot : isect)
+        tmp.erase(mot);
     }
   }
 
-  for (const auto& mot : tmp) {
-    if (motStr.size()) motStr += "-";
+  for (const auto &mot : tmp) {
+    if (motStr.size())
+      motStr += "-";
     motStr += ad::cppgtfs::gtfs::flat::Route::getTypeString(mot);
   }
 
@@ -488,8 +790,9 @@ std::string getFileNameMotStr(const MOTs& mots) {
 }
 
 // _____________________________________________________________________________
-std::vector<std::string> getCfgPaths(const Config& cfg) {
-  if (cfg.configPaths.size()) return cfg.configPaths;
+std::vector<std::string> getCfgPaths(const Config &cfg) {
+  if (cfg.configPaths.size())
+    return cfg.configPaths;
   std::vector<std::string> ret;
 
   // install prefix global configuration path, if available

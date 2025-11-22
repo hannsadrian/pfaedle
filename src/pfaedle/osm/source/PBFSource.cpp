@@ -462,3 +462,7 @@ bool PBFSource::getNodeLocation(osmid id, double *lat, double *lon) const {
 
   return false;
 }
+// _____________________________________________________________________________
+size_t PBFSource::getLocationIndexSize() const {
+  return _locationIndex ? _locationIndex->size() : 0;
+}

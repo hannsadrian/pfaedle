@@ -75,96 +75,137 @@ OsmBuilder::OsmBuilder() {}
 
 // _____________________________________________________________________________
 void OsmBuilder::read(const std::string &path, const OsmReadOpts &opts,
-                      Graph *g, const BBoxIdx &bbox, double gridSize,
-                      Restrictor *res) {
-  if (!bbox.size())
+                      Graph *g, const BBoxIdx &box, double gridSize,
+                      Restrictor *res,
+                      std::function<bool(size_t)> checkSmartSkip) {
+  source::OsmSource *source = 0;
+
+  if (path.size() > 3 && 0 == path.compare(path.size() - 4, 4, ".pbf")) {
+    source = new source::PBFSource(path);
+  } else {
+    source = new source::XMLSource(path);
+  }
+
+  if (checkSmartSkip) {
+    // If we have a smart skip check, we need to build the location index first
+    // to know the size. This is only supported for PBF sources currently.
+    if (box.size() > 0) {
+      if (auto pbfSource = dynamic_cast<source::PBFSource *>(source)) {
+        LOG(INFO) << "Building location index to check dataset size...";
+        pfaedle::osm::BBoxIdx const &constBox = box;
+        pbfSource->buildLocationIndex(constBox.getFullBox());
+        size_t nodeCount = pbfSource->getLocationIndexSize();
+
+        if (checkSmartSkip(nodeCount)) {
+          LOG(INFO) << "Smart skip triggered: skipping OSM processing.";
+          delete source;
+          return;
+        }
+      }
+    }
+  }
+
+  readImpl(source, opts, g, box, gridSize, res);
+  delete source;
+}
+
+// _____________________________________________________________________________
+void OsmBuilder::readImpl(source::OsmSource *source, const OsmReadOpts &opts,
+                          Graph *g, const BBoxIdx &box, double gridSize,
+                          Restrictor *res) {
+  if (!box.size())
     return;
 
-  LOG(INFO) << "Reading OSM file " << path << " ... ";
+  LOG(INFO) << "Reading OSM file "
+            << (dynamic_cast<source::PBFSource *>(source) ? "PBF" : "XML")
+            << " ... ";
 
-  NodeSet orphanStations;
+  // 1. Read all nodes within the bounding box
+  //    - if PBF: build location index for these nodes
+  //    - if XML: store them in a set
+  OsmIdSet bboxNodes;
+  OsmIdSet noHupNodes;
+  OsmFilter filter(opts);
+  AttrKeySet attrKeys[3];
+  getKeptAttrKeys(opts, attrKeys);
+
+  RelLst intmRels;
+  RelMap nodeRels;
+  RelMap wayRels;
+  Restrictions rawRests;
+  NIdMap nodes;
+  NIdMultMap multNodes;
   EdgTracks eTracks;
-  {
-    OsmIdSet bboxNodes, noHupNodes;
+  NodeSet orphanStations;
 
-    NIdMap nodes;
-    NIdMultMap multNodes;
-    RelLst intmRels;
-    RelMap nodeRels, wayRels;
+  // PBF optimization: use location index
+  if (auto pbfSource = dynamic_cast<source::PBFSource *>(source)) {
 
-    Restrictions rawRests;
-
-    AttrKeySet attrKeys[3] = {};
-    getKeptAttrKeys(opts, attrKeys);
-
-    OsmFilter filter(opts);
-    OsmSource *source;
-    PBFSource *pbfSource = nullptr;
-
-    if (util::endsWith(path, ".pbf")) {
-      pbfSource = new PBFSource(path);
-      source = pbfSource;
-    } else {
-      source = new XMLSource(path);
-    }
-
-    // For PBF files, we can use an optimized 2-pass approach with location
-    // index For other formats, fall back to the 4-pass approach
-    if (pbfSource) {
-      LOG(DEBUG) << "Using optimized 2-pass PBF reading with location index...";
-
-      // Pass 1: Build location index for bbox nodes and read relations
+    // Pass 1: Build location index for bbox nodes and read relations
+    // Note: location index might already be built if smart skip check was
+    // performed
+    if (pbfSource->getLocationIndexSize() == 0) {
       LOG(DEBUG) << "Pass 1: Building location index and reading relations...";
-      pbfSource->buildLocationIndex(bbox.getFullBox());
-      readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
-               &rawRests);
-
-      // Pass 2: Read ways and build edges using location index
-      LOG(DEBUG) << "Pass 2: Reading edges with location index...";
-      readEdgesWithLocationIndex(pbfSource, g, intmRels, wayRels, filter,
-                                 &nodes, &multNodes, noHupNodes, attrKeys[1],
-                                 rawRests, res, intmRels.flat, &eTracks, opts);
-
-      // NOTE: Skipping orphan stations scan for performance optimization
-      // Orphan stations are rare (stations not connected to any way)
-      // and scanning all 422M nodes is expensive. If needed, they can be
-      // found by pre-processing the OSM file or using a spatial index.
-      LOG(INFO) << "Skipping orphan stations scan (performance optimization)";
+      pbfSource->buildLocationIndex(box.getFullBox());
     } else {
-      LOG(DEBUG) << "Using standard 4-pass reading...";
-
-      // we do four passes of the file here to be as memory creedy as possible:
-      // - the first pass collects all node IDs which are
-      //    * inside the given bounding box
-      //    * (TODO: maybe more filtering?)
-      //   these nodes are stored on the HD via OsmIdSet (which implements a
-      //   simple bloom filter / base 256 encoded id store
-      // - the second pass collects filtered relations
-      // - the third pass collects filtered ways which contain one of the nodes
-      //   from pass 1
-      // - the forth pass collects filtered nodes which were
-      //    * collected as node ids in pass 1
-      //    * match the filter criteria
-      //    * have been used in a way in pass 3
-
-      LOG(DEBUG) << "Reading bounding box nodes...";
-      readBBoxNds(source, &bboxNodes, &noHupNodes, filter, bbox);
-
-      LOG(DEBUG) << "Reading relations...";
-      readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
-               &rawRests);
-
-      LOG(DEBUG) << "Reading edges...";
-      readEdges(source, g, intmRels, wayRels, filter, bboxNodes, &nodes,
-                &multNodes, noHupNodes, attrKeys[1], rawRests, res,
-                intmRels.flat, &eTracks, opts);
-
-      LOG(DEBUG) << "Reading kept nodes...";
-      readNodes(source, g, intmRels, nodeRels, filter, bboxNodes, &nodes,
-                &multNodes, &orphanStations, attrKeys[0], intmRels.flat, opts);
+      LOG(DEBUG)
+          << "Pass 1: Reading relations (location index already built)...";
     }
 
-    delete source;
+    readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
+             &rawRests);
+
+    // LOG(DEBUG) << "Pass 2: Reading edges with location index...";
+    // readOrphanStationsWithLocationIndex(pbfSource, g, &orphanStations,
+    // intmRels,
+    //                                 nodeRels, filter, box, attrKeys[0],
+    //                                 intmRels.flat, opts);
+
+    // NOTE: Skipping orphan stations scan for performance optimization
+    // Orphan stations are rare (stations not connected to any way)
+    // and scanning for them is expensive (requires full node scan).
+    LOG(INFO) << "Skipping orphan stations scan (performance optimization)";
+
+    LOG(DEBUG) << "Pass 3: Reading edges with location index...";
+    readEdgesWithLocationIndex(pbfSource, g, intmRels, wayRels, filter, &nodes,
+                               &multNodes, noHupNodes, attrKeys[1], rawRests,
+                               res, intmRels.flat, &eTracks, opts);
+
+  } else {
+    LOG(DEBUG) << "Using standard 4-pass reading...";
+
+    // we do four passes of the file here to be as memory creedy as possible:
+    // 1. get all nodes in the bounding box
+    // 2. get all relations (and their nodes) we want to keep
+    // 3. get all edges we want to keep
+    // 4. get all nodes we want to keep
+    //
+    // The reason for this is that we want to filter the nodes as effective
+    // as possible, but we only know if a node is kept when we know if it
+    // is part of a relation or a way we want to keep.
+    //
+    // This is not necessary for PBF files, where we can use the location index
+    // to check for node existance.
+
+    //    * are in the bounding box
+    //    * are used in a relation in pass 2
+    //    * have been used in a way in pass 3
+
+    LOG(DEBUG) << "Reading bounding box nodes...";
+    readBBoxNds(source, &bboxNodes, &noHupNodes, filter, box);
+
+    LOG(DEBUG) << "Reading relations...";
+    readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
+             &rawRests);
+
+    LOG(DEBUG) << "Reading edges...";
+    readEdges(source, g, intmRels, wayRels, filter, bboxNodes, &nodes,
+              &multNodes, noHupNodes, attrKeys[1], rawRests, res, intmRels.flat,
+              &eTracks, opts);
+
+    LOG(DEBUG) << "Reading kept nodes...";
+    readNodes(source, g, intmRels, nodeRels, filter, bboxNodes, &nodes,
+              &multNodes, &orphanStations, attrKeys[0], intmRels.flat, opts);
   }
 
   LOG(DEBUG) << "OSM ID set lookups: " << osm::OsmIdSet::LOOKUPS
@@ -177,13 +218,13 @@ void OsmBuilder::read(const std::string &path, const OsmReadOpts &opts,
 
   {
     LOG(INFO) << "Fixing gaps in graph...";
-    NodeGrid ng = buildNodeIdx(g, gridSize, bbox.getFullBox(), false);
+    NodeGrid ng = buildNodeIdx(g, gridSize, box.getFullBox(), false);
     LOG(DEBUG) << "Grid size of " << ng.getXWidth() << "x" << ng.getYHeight();
     fixGaps(g, &ng);
   }
 
   LOG(INFO) << "Snapping stations to graph...";
-  snapStats(opts, g, bbox, gridSize, res, orphanStations);
+  snapStats(opts, g, box, gridSize, res, orphanStations);
 
   LOG(INFO) << "Collapsing edges...";
   collapseEdges(g);
@@ -226,6 +267,8 @@ void OsmBuilder::read(const std::string &path, const OsmReadOpts &opts,
             << numEdges << " edges, " << comps
             << " connected component(s) with more than 1 node";
   LOG(DEBUG) << _lines.size() << " transit lines have been read.";
+
+  // THIS CAUSED A SEGFAULT delete source;
 }
 
 // _____________________________________________________________________________
