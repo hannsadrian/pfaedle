@@ -76,6 +76,7 @@ public:
   size_t getLocationIndexSize() const;
 
 private:
+  mutable std::mutex _indexMutex;
   std::string _path;
   std::unique_ptr<osmium::io::Reader> _reader;
   osmium::memory::Buffer _buffer;

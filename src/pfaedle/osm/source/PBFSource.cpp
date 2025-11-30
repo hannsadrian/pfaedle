@@ -419,6 +419,7 @@ void PBFSource::buildLocationIndex(const util::geo::Box<double> &bbox) {
 
 // _____________________________________________________________________________
 bool PBFSource::hasNodeLocation(osmid id) const {
+  std::lock_guard<std::mutex> lock(_indexMutex);
   if (!_locationIndex)
     return false;
 
@@ -432,6 +433,7 @@ bool PBFSource::hasNodeLocation(osmid id) const {
 
 // _____________________________________________________________________________
 bool PBFSource::getNodeLocation(osmid id, double *lat, double *lon) const {
+  std::lock_guard<std::mutex> lock(_indexMutex);
   if (!_locationIndex)
     return false;
 

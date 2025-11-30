@@ -401,6 +401,23 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
           cannotWrite(curFileTg);
       }
     }
+
+    if (_writeReusedFlag) {
+#ifdef LIBZIP_FOUND
+      writeReusedFlag(gtfsPath, toZip, za);
+#else
+      writeReusedFlag(gtfsPath, toZip, 0);
+#endif
+    }
+
+    if (!_mapping.empty()) {
+#ifdef LIBZIP_FOUND
+      writeMapping(gtfsPath, toZip, za);
+#else
+      writeMapping(gtfsPath, toZip, 0);
+#endif
+    }
+
   } catch (...) {
 #ifdef LIBZIP_FOUND
     zip_discard(za);
@@ -418,6 +435,51 @@ void Writer::write(gtfs::Feed *sourceFeed, const std::string &path) const {
     if (std::rename(tmpZip.c_str(), targetZipPath.c_str()))
       cannotWrite(targetZipPath);
 #endif
+  }
+}
+
+// ____________________________________________________________________________
+void Writer::writeReusedFlag(const std::string& gtfsPath, bool toZip, zip* za) const {
+  std::string curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "pfaedle.reused");
+  std::string curFileTg = gtfsPath + "/pfaedle.reused";
+  std::ofstream fs(curFile.c_str());
+  fs.close(); // Empty file
+
+  if (toZip) {
+#ifdef LIBZIP_FOUND
+    moveIntoZip(za, curFile, "pfaedle.reused");
+#endif
+  } else {
+    if (std::rename(curFile.c_str(), curFileTg.c_str()))
+      cannotWrite(curFileTg);
+  }
+}
+
+// ____________________________________________________________________________
+void Writer::writeMapping(const std::string& gtfsPath, bool toZip, zip* za) const {
+  std::string curFile = getTmpFName(gtfsPath, ".pfaedle-tmp", "mapping.csv");
+  std::string curFileTg = gtfsPath + "/mapping.csv";
+  std::ofstream fs(curFile.c_str());
+  
+  if (!fs.good()) cannotWrite(curFile, curFileTg);
+  
+  ad::util::CsvWriter csvw(&fs, {"shape_id", "trip_id"});
+  csvw.flushLine();
+  
+  for (const auto& p : _mapping) {
+    csvw.writeString(p.first);
+    csvw.writeString(p.second);
+    csvw.flushLine();
+  }
+  fs.close();
+
+  if (toZip) {
+#ifdef LIBZIP_FOUND
+    moveIntoZip(za, curFile, "mapping.csv");
+#endif
+  } else {
+    if (std::rename(curFile.c_str(), curFileTg.c_str()))
+      cannotWrite(curFileTg);
   }
 }
 

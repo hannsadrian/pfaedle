@@ -20,9 +20,14 @@ namespace gtfs {
 
 class Writer {
  public:
-  Writer() {}
+  Writer() : _writeReusedFlag(false) {}
 
   void write(Feed* sourceFeed, const std::string& path) const;
+
+  void setWriteReusedFlag(bool w) { _writeReusedFlag = w; }
+  void setMapping(const std::vector<std::pair<std::string, std::string>>& m) {
+    _mapping = m;
+  }
 
  private:
   void writeFeedInfo(Feed* f, std::ostream* os) const;
@@ -42,6 +47,8 @@ class Writer {
   void writePathways(Feed* f, std::ostream* os) const;
   void writeAttributions(Feed* f, std::ostream* os) const;
   void writeTranslations(Feed* f, std::ostream* os) const;
+  void writeReusedFlag(const std::string& path, bool toZip, zip* za) const;
+  void writeMapping(const std::string& path, bool toZip, zip* za) const;
 
   static void cannotWrite(const std::string& file, const std::string& file2);
   static void cannotWrite(const std::string& file);
@@ -52,6 +59,8 @@ class Writer {
 #endif
 
   mutable std::ifstream _ifs;
+  bool _writeReusedFlag;
+  std::vector<std::pair<std::string, std::string>> _mapping;
 };
 
 }  // namespace gtfs
