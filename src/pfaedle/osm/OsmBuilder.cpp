@@ -878,15 +878,7 @@ void OsmBuilder::readEdgesWithLocationIndex(
     total_ways++;
 
     // 1. Fast BBox Check
-    bool inBBox = false;
-    for (const auto &node : way.nodes()) {
-      if (source->hasNodeLocation(node.ref())) {
-        inBBox = true;
-        break;
-      }
-    }
-
-    if (!inBBox)
+    if (!source->anyNodeInBBox(way))
       return;
 
     // 2. Filter Check

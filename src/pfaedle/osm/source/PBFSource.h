@@ -66,6 +66,9 @@ public:
   // Build location index for nodes in the given bounding box
   void buildLocationIndex(const util::geo::Box<double> &bbox);
 
+  // Check if any node of the way is in the bounding box (batch check with single lock)
+  bool anyNodeInBBox(const osmium::Way &way) const;
+
   // Check if a node location is available in the index
   bool hasNodeLocation(osmid id) const;
 
