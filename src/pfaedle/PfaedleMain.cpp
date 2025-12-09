@@ -763,7 +763,12 @@ write_output:
                 {trip.getShape(), trip.getId()});
           }
         }
-        w.setMapping(mapping);
+        if (!mapping.empty()) {
+          LOG(INFO) << "Writing mapping.csv with " << mapping.size() << " entries...";
+          w.setMapping(mapping);
+        } else {
+          LOG(WARN) << "No trips with shapes found - mapping.csv will not be created";
+        }
       }
 
       w.write(&gtfs[0], cfg.outputPath);

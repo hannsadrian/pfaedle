@@ -71,8 +71,13 @@ inline bool Parser::nextTranslation(
     else {
       std::stringstream msg;
       msg << "'" << table << "' is not a valid table";
-      throw ParserException(msg.str(), "table_name", csvp->getCurLine(),
-                            csvp->getReadablePath());
+      if (_strict) {
+        throw ParserException(msg.str(), "table_name", csvp->getCurLine(),
+                              csvp->getReadablePath());
+      } else {
+        if (_warnCb) _warnCb(csvp->getReadablePath() + ":" + std::to_string(csvp->getCurLine()) + ": in field 'table_name', " + msg.str());
+        continue;  // Skip this invalid translation
+      }
     }
 
     t->fieldName = getString(*csvp, flds.fieldNameFld, "");
