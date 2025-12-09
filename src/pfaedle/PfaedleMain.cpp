@@ -755,6 +755,7 @@ write_output:
       if (shapesReused) {
         w.setWriteReusedFlag(true);
       } else {
+        // Write mapping for all newly generated shapes
         std::vector<std::pair<std::string, std::string>> mapping;
         for (const auto &trip : gtfs[0].getTrips()) {
           if (!trip.getShape().empty()) {

@@ -201,8 +201,13 @@ void Parser::parseAttributions(gtfs::FEEDB* targetFeed, CsvParser* csvp) const {
         msg << "no trip with id '" << a.tripId
             << "' defined in trips.txt, cannot "
             << "reference here.";
-        throw ParserException(msg.str(), "trip_id", csvp->getCurLine(),
-                              csvp->getReadablePath());
+        if (_strict) {
+          throw ParserException(msg.str(), "trip_id", csvp->getCurLine(),
+                                csvp->getReadablePath());
+        } else {
+          if (_warnCb) _warnCb(csvp->getReadablePath() + ":" + std::to_string(csvp->getCurLine()) + ": " + msg.str());
+          continue;  // Skip this invalid record
+        }
       }
     }
 
@@ -1662,8 +1667,13 @@ void Parser::parseStopTimes(gtfs::FEEDB* targetFeed, CsvParser* csvp) const {
       std::stringstream msg;
       msg << "no stop with id '" << fst.s << "' defined in stops.txt, cannot "
           << "reference here.";
-      throw ParserException(msg.str(), "stop_id", csvp->getCurLine(),
-                            csvp->getReadablePath());
+      if (_strict) {
+        throw ParserException(msg.str(), "stop_id", csvp->getCurLine(),
+                              csvp->getReadablePath());
+      } else {
+        if (_warnCb) _warnCb(csvp->getReadablePath() + ":" + std::to_string(csvp->getCurLine()) + ": " + msg.str());
+        continue;  // Skip this invalid stop_time
+      }
     }
 
     if (!trip) {
@@ -1671,8 +1681,13 @@ void Parser::parseStopTimes(gtfs::FEEDB* targetFeed, CsvParser* csvp) const {
       msg << "no trip with id '" << fst.trip
           << "' defined in trips.txt, cannot "
           << "reference here.";
-      throw ParserException(msg.str(), "trip_id", csvp->getCurLine(),
-                            csvp->getReadablePath());
+      if (_strict) {
+        throw ParserException(msg.str(), "trip_id", csvp->getCurLine(),
+                              csvp->getReadablePath());
+      } else {
+        if (_warnCb) _warnCb(csvp->getReadablePath() + ":" + std::to_string(csvp->getCurLine()) + ": " + msg.str());
+        continue;  // Skip this invalid stop_time
+      }
     }
 
     StopTimeT<StopT> st(fst.at, fst.dt, stop, fst.sequence, fst.headsign,
@@ -1707,8 +1722,16 @@ void Parser::fileNotFound(const std::string& file) const {
 std::string Parser::getString(const CsvParser& csv, size_t field) const {
   const char* r = csv.getTString(field);
   if (r[0] == 0) {
-    throw ParserException("expected non-empty string", csv.getFieldName(field),
-                          csv.getCurLine(), csv.getReadablePath());
+    if (_strict) {
+      throw ParserException("expected non-empty string", csv.getFieldName(field),
+                            csv.getCurLine(), csv.getReadablePath());
+    } else {
+      // Return empty string in lenient mode - caller must handle this
+      if (_warnCb) {
+        _warnCb(csv.getReadablePath() + ":" + std::to_string(csv.getCurLine()) + ": in field '" + csv.getFieldName(field) + "', expected non-empty string");
+      }
+      return "";
+    }
   }
   return r;
 }
