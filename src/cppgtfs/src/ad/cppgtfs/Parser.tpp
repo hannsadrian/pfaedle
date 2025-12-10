@@ -76,7 +76,7 @@ inline bool Parser::nextTranslation(
                               csvp->getReadablePath());
       } else {
         if (_warnCb) _warnCb(csvp->getReadablePath() + ":" + std::to_string(csvp->getCurLine()) + ": in field 'table_name', " + msg.str());
-        continue;  // Skip this invalid translation
+        return false;  // Skip this invalid translation
       }
     }
 
