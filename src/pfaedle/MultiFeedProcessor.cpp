@@ -394,8 +394,15 @@ void MultiFeedProcessor::buildIndex(GraphBundle &bundle,
 }
 
 void MultiFeedProcessor::processFeeds() {
-  int feedIdx = 0;
-  for (const auto &path : _feedPaths) {
+  // We want copy-on-write sharing of the large pre-built graphs. This is
+  // achieved by fork()ing per feed *after* graphs are built.
+  //
+  // However, on macOS, forking a process that has used threads (even if joined)
+  // is prone to crashes like "std::system_error: thread::join failed".
+  // Therefore we only use fork() on Linux.
+#if defined(__linux__)
+  for (size_t feedIdx = 0; feedIdx < _feedPaths.size(); ++feedIdx) {
+    const auto &path = _feedPaths[feedIdx];
     LOG(INFO) << "Processing Feed " << (feedIdx + 1) << "/" << _feedPaths.size()
               << ": " << path;
 
@@ -404,11 +411,11 @@ void MultiFeedProcessor::processFeeds() {
     if (pid == 0) {
       // Child
       try {
-        processSingleFeed(feedIdx);
-        exit(0);
+        processSingleFeed((int)feedIdx);
+        _exit(0);
       } catch (const std::exception &e) {
         LOG(ERROR) << "Child process failed: " << e.what();
-        exit(1);
+        _exit(1);
       }
     } else if (pid > 0) {
       // Parent
@@ -422,9 +429,20 @@ void MultiFeedProcessor::processFeeds() {
     } else {
       LOG(ERROR) << "Fork failed!";
     }
-
-    feedIdx++;
   }
+#else
+  for (size_t feedIdx = 0; feedIdx < _feedPaths.size(); ++feedIdx) {
+    const auto &path = _feedPaths[feedIdx];
+    LOG(INFO) << "Processing Feed " << (feedIdx + 1) << "/" << _feedPaths.size()
+              << ": " << path;
+    try {
+      processSingleFeed((int)feedIdx);
+      LOG(INFO) << "Feed " << path << " processed successfully.";
+    } catch (const std::exception &e) {
+      LOG(ERROR) << "Feed " << path << " failed: " << e.what();
+    }
+  }
+#endif
 }
 
 void MultiFeedProcessor::processSingleFeed(int feedIdx) {
