@@ -56,7 +56,10 @@ public:
       pfaedle::gtfs::Feed *feed, MOTs mots, const config::MotConfig &motCfg,
       trgraph::Graph *g, router::FeedStops *stops, osm::Restrictor *restr,
       const pfaedle::statsimiclassifier::StatsimiClassifier *classifier,
-      router::Router *router, const config::Config &cfg);
+      router::Router *router, const config::Config &cfg,
+      trgraph::EdgeGrid *eGrid = 0, trgraph::NodeGrid *nGrid = 0);
+
+  ~ShapeBuilder();
 
   Stats shapeify(pfaedle::netgraph::Graph *outNg);
 
@@ -162,8 +165,9 @@ private:
                      const std::map<RoutingAttrs, std::vector<Trip *>> *trips,
                      TripForests *forest);
 
-  pfaedle::trgraph::EdgeGrid _eGrid;
-  pfaedle::trgraph::NodeGrid _nGrid;
+  pfaedle::trgraph::EdgeGrid *_eGrid;
+  pfaedle::trgraph::NodeGrid *_nGrid;
+  bool _ownGrids;
 };
 
 } // namespace router

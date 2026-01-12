@@ -65,21 +65,34 @@ ShapeBuilder::ShapeBuilder(
     pfaedle::trgraph::Graph *g, router::FeedStops *fStops,
     osm::Restrictor *restr,
     const pfaedle::statsimiclassifier::StatsimiClassifier *classifier,
-    router::Router *router, const config::Config &cfg)
+    router::Router *router, const config::Config &cfg, trgraph::EdgeGrid *eGrid,
+    trgraph::NodeGrid *nGrid)
     : _feed(feed), _mots(mots), _motCfg(motCfg), _cfg(cfg), _g(g),
       _stops(fStops), _curShpCnt(0), _restr(restr), _classifier(classifier),
-      _router(router) {
-  pfaedle::osm::BBoxIdx box(cfg.boxPadding);
-  ShapeBuilder::getGtfsBox(feed, mots, cfg.shapeTripId, cfg.dropShapes, &box,
-                           _motCfg.osmBuildOpts.maxSpeed, 0, cfg.verbosity);
+      _router(router), _eGrid(eGrid), _nGrid(nGrid), _ownGrids(false) {
 
-  _eGrid = EdgeGrid(cfg.gridSize, cfg.gridSize, box.getFullBox(), false);
-  _nGrid = NodeGrid(cfg.gridSize, cfg.gridSize, box.getFullBox(), false);
+  if (!_eGrid || !_nGrid) {
+    pfaedle::osm::BBoxIdx box(cfg.boxPadding);
+    ShapeBuilder::getGtfsBox(feed, mots, cfg.shapeTripId, cfg.dropShapes, &box,
+                             _motCfg.osmBuildOpts.maxSpeed, 0, cfg.verbosity);
 
-  LOG(DEBUG) << "Grid size of " << _nGrid.getXWidth() << "x"
-             << _nGrid.getYHeight();
+    _eGrid = new EdgeGrid(cfg.gridSize, cfg.gridSize, box.getFullBox(), false);
+    _nGrid = new NodeGrid(cfg.gridSize, cfg.gridSize, box.getFullBox(), false);
+    _ownGrids = true;
 
-  buildIndex();
+    LOG(DEBUG) << "Grid size of " << _nGrid->getXWidth() << "x"
+               << _nGrid->getYHeight();
+
+    buildIndex();
+  }
+}
+
+// _____________________________________________________________________________
+ShapeBuilder::~ShapeBuilder() {
+  if (_ownGrids) {
+    delete _eGrid;
+    delete _nGrid;
+  }
 }
 
 // _____________________________________________________________________________
@@ -92,14 +105,14 @@ void ShapeBuilder::buildIndex() {
       if (e->pl().oneWay() == 2)
         continue;
 
-      _eGrid.add(*e->pl().getGeom(), e);
+      _eGrid->add(*e->pl().getGeom(), e);
     }
   }
 
   for (auto *n : _g->getNds()) {
     // only station nodes
     if (n->pl().getSI()) {
-      _nGrid.add(*n->pl().getGeom(), n);
+      _nGrid->add(*n->pl().getGeom(), n);
     }
   }
 }
@@ -193,9 +206,9 @@ EdgeCandGroup ShapeBuilder::getEdgCands(const Stop *s) const {
   }
 
   std::set<trgraph::Node *> frNIdx;
-  _nGrid.get(util::geo::pad(util::geo::getBoundingBox(pos),
-                            (maxMDist / M_PER_DEG) / distor),
-             &frNIdx);
+  _nGrid->get(util::geo::pad(util::geo::getBoundingBox(pos),
+                             (maxMDist / M_PER_DEG) / distor),
+              &frNIdx);
 
   if (_motCfg.routingOpts.useStations) {
     for (auto nd : frNIdx) {
@@ -237,9 +250,9 @@ EdgeCandGroup ShapeBuilder::getEdgCands(const Stop *s) const {
   maxMDist = _motCfg.osmBuildOpts.maxSnapDistance;
 
   std::set<trgraph::Edge *> frEIdx;
-  _eGrid.get(util::geo::pad(util::geo::getBoundingBox(pos),
-                            (maxMDist / M_PER_DEG) / distor),
-             &frEIdx);
+  _eGrid->get(util::geo::pad(util::geo::getBoundingBox(pos),
+                             (maxMDist / M_PER_DEG) / distor),
+              &frEIdx);
 
   std::set<trgraph::Edge *> selected;
   std::map<const trgraph::Edge *, double> scores;

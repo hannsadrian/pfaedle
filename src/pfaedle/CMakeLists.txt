@@ -1,4 +1,8 @@
+
 file(GLOB_RECURSE pfaedle_SRC *.cpp)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(pfaedle_main PfaedleMain.cpp)
 

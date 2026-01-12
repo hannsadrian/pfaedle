@@ -24,6 +24,7 @@
 
 #include "ad/cppgtfs/Parser.h"
 #include "ad/cppgtfs/Writer.h"
+#include "pfaedle/MultiFeedProcessor.h"
 #include "pfaedle/config/ConfigReader.h"
 #include "pfaedle/config/MotConfig.h"
 #include "pfaedle/config/MotConfigReader.h"
@@ -101,252 +102,253 @@ std::vector<std::string> getCfgPaths(const Config &cfg);
 void gtfsWarnCb(std::string msg) { LOG(WARN) << msg; }
 
 // _____________________________________________________________________________
-bool checkGlobalShapeQuality(const pfaedle::gtfs::Feed& feed, const MOTs& mots, const Config& cfg) {
-    if (!cfg.smartShapeDrop) return false;
-    if (cfg.feedPaths.empty()) return false;
+bool checkGlobalShapeQuality(const pfaedle::gtfs::Feed &feed, const MOTs &mots,
+                             const Config &cfg) {
+  if (!cfg.smartShapeDrop)
+    return false;
+  if (cfg.feedPaths.empty())
+    return false;
 
-    LOG(INFO) << "Analyzing global shape quality (sampling from shapes.txt)...";
+  LOG(INFO) << "Analyzing global shape quality (sampling from shapes.txt)...";
 
-    const size_t MAX_SHAPES_TO_SAMPLE = 50;
-    std::unordered_map<std::string, size_t> sampledShapePoints;
-    std::unordered_map<std::string, size_t> shapeToStopCount;
+  const size_t MAX_SHAPES_TO_SAMPLE = 50;
+  std::unordered_map<std::string, size_t> sampledShapePoints;
+  std::unordered_map<std::string, size_t> shapeToStopCount;
 
-    // First pass: build map of shape_id -> typical stop count
-    std::set<std::string> allShapeIds;
-    for (const auto &trip : feed.getTrips()) {
-      if (mots.count(trip.getRoute()->getType())) {
-        if (!trip.getShape().empty()) {
-          allShapeIds.insert(trip.getShape());
-          size_t stops = trip.getStopTimes().size();
-          auto &existing = shapeToStopCount[trip.getShape()];
-          if (existing == 0 || stops > existing) {
-            existing = stops; // Keep the max stop count for this shape
-          }
+  // First pass: build map of shape_id -> typical stop count
+  std::set<std::string> allShapeIds;
+  for (const auto &trip : feed.getTrips()) {
+    if (mots.count(trip.getRoute()->getType())) {
+      if (!trip.getShape().empty()) {
+        allShapeIds.insert(trip.getShape());
+        size_t stops = trip.getStopTimes().size();
+        auto &existing = shapeToStopCount[trip.getShape()];
+        if (existing == 0 || stops > existing) {
+          existing = stops; // Keep the max stop count for this shape
         }
       }
     }
+  }
 
-    // Read shapes.txt from zip or directory
-    std::string feedPath = cfg.feedPaths[0];
-    bool isZip = (feedPath.size() > 4 &&
-                  feedPath.substr(feedPath.size() - 4) == ".zip");
+  // Read shapes.txt from zip or directory
+  std::string feedPath = cfg.feedPaths[0];
+  bool isZip =
+      (feedPath.size() > 4 && feedPath.substr(feedPath.size() - 4) == ".zip");
 
-    std::set<std::string> sampledShapeIds;
-    int shapeIdIdx = -1;
-    bool headerParsed = false;
+  std::set<std::string> sampledShapeIds;
+  int shapeIdIdx = -1;
+  bool headerParsed = false;
 
 #ifdef LIBZIP_FOUND
-    if (isZip) {
-      LOG(INFO) << "Reading shapes.txt from ZIP: " << feedPath;
-      int err = 0;
-      zip *za = zip_open(feedPath.c_str(), ZIP_RDONLY, &err);
-      if (za) {
-        zip_file *zf = zip_fopen(za, "shapes.txt", 0);
-        if (zf) {
-          char buffer[8192];
-          std::string remainder;
-          zip_int64_t bytesRead;
+  if (isZip) {
+    LOG(INFO) << "Reading shapes.txt from ZIP: " << feedPath;
+    int err = 0;
+    zip *za = zip_open(feedPath.c_str(), ZIP_RDONLY, &err);
+    if (za) {
+      zip_file *zf = zip_fopen(za, "shapes.txt", 0);
+      if (zf) {
+        char buffer[8192];
+        std::string remainder;
+        zip_int64_t bytesRead;
 
-          while (sampledShapeIds.size() < MAX_SHAPES_TO_SAMPLE &&
-                 (bytesRead = zip_fread(zf, buffer, sizeof(buffer))) > 0) {
-            remainder.append(buffer, bytesRead);
+        while (sampledShapeIds.size() < MAX_SHAPES_TO_SAMPLE &&
+               (bytesRead = zip_fread(zf, buffer, sizeof(buffer))) > 0) {
+          remainder.append(buffer, bytesRead);
 
-            size_t pos = 0;
-            size_t newlinePos;
-            while ((newlinePos = remainder.find('\n', pos)) !=
-                   std::string::npos) {
-              std::string line = remainder.substr(pos, newlinePos - pos);
-              if (!line.empty() && line.back() == '\r')
-                line.pop_back();
-
-              if (!headerParsed) {
-                // Parse Header
-                std::stringstream lss(line);
-                std::string col;
-                int idx = 0;
-                while (std::getline(lss, col, ',')) {
-                  if (idx == 0 && col.size() > 3 &&
-                      col.substr(0, 3) == "\xEF\xBB\xBF")
-                    col = col.substr(3);
-                  if (col == "shape_id") {
-                    shapeIdIdx = idx;
-                    break;
-                  }
-                  idx++;
-                }
-                if (shapeIdIdx == -1)
-                  shapeIdIdx = 0; // Fallback to first column
-                headerParsed = true;
-              } else {
-                // Parse Data
-                std::string shapeId;
-                int currentIdx = 0;
-                size_t start = 0;
-                size_t end = line.find(',');
-                while (end != std::string::npos) {
-                  if (currentIdx == shapeIdIdx) {
-                    shapeId = line.substr(start, end - start);
-                    break;
-                  }
-                  start = end + 1;
-                  end = line.find(',', start);
-                  currentIdx++;
-                }
-                if (currentIdx == shapeIdIdx && shapeId.empty())
-                  shapeId = line.substr(start);
-
-                if (!shapeId.empty() && allShapeIds.count(shapeId)) {
-                  sampledShapePoints[shapeId]++;
-                  sampledShapeIds.insert(shapeId);
-                }
-              }
-
-              pos = newlinePos + 1;
-              if (sampledShapeIds.size() >= MAX_SHAPES_TO_SAMPLE)
-                break;
-            }
-            remainder = remainder.substr(pos);
-          }
-          zip_fclose(zf);
-        } else {
-          LOG(WARN) << "Could not open shapes.txt in zip: " << feedPath;
-        }
-        zip_close(za);
-      } else {
-        LOG(WARN) << "Could not open zip file: " << feedPath;
-      }
-    } else
-#endif
-    {
-      // Read from directory
-      std::string shapesPath = feedPath + "/shapes.txt";
-      std::ifstream shapesFile(shapesPath);
-
-      if (shapesFile.is_open()) {
-        std::string line;
-        if (std::getline(shapesFile, line)) {
-          if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-          // Parse Header
-          std::stringstream lss(line);
-          std::string col;
-          int idx = 0;
-          while (std::getline(lss, col, ',')) {
-            if (idx == 0 && col.size() > 3 &&
-                col.substr(0, 3) == "\xEF\xBB\xBF")
-              col = col.substr(3);
-            if (col == "shape_id") {
-              shapeIdIdx = idx;
-              break;
-            }
-            idx++;
-          }
-          if (shapeIdIdx == -1)
-            shapeIdIdx = 0;
-
-          while (std::getline(shapesFile, line) &&
-                 sampledShapeIds.size() < MAX_SHAPES_TO_SAMPLE) {
+          size_t pos = 0;
+          size_t newlinePos;
+          while ((newlinePos = remainder.find('\n', pos)) !=
+                 std::string::npos) {
+            std::string line = remainder.substr(pos, newlinePos - pos);
             if (!line.empty() && line.back() == '\r')
               line.pop_back();
 
-            std::string shapeId;
-            int currentIdx = 0;
-            size_t start = 0;
-            size_t end = line.find(',');
-            while (end != std::string::npos) {
-              if (currentIdx == shapeIdIdx) {
-                shapeId = line.substr(start, end - start);
-                break;
+            if (!headerParsed) {
+              // Parse Header
+              std::stringstream lss(line);
+              std::string col;
+              int idx = 0;
+              while (std::getline(lss, col, ',')) {
+                if (idx == 0 && col.size() > 3 &&
+                    col.substr(0, 3) == "\xEF\xBB\xBF")
+                  col = col.substr(3);
+                if (col == "shape_id") {
+                  shapeIdIdx = idx;
+                  break;
+                }
+                idx++;
               }
-              start = end + 1;
-              end = line.find(',', start);
-              currentIdx++;
-            }
-            if (currentIdx == shapeIdIdx && shapeId.empty())
-              shapeId = line.substr(start);
+              if (shapeIdIdx == -1)
+                shapeIdIdx = 0; // Fallback to first column
+              headerParsed = true;
+            } else {
+              // Parse Data
+              std::string shapeId;
+              int currentIdx = 0;
+              size_t start = 0;
+              size_t end = line.find(',');
+              while (end != std::string::npos) {
+                if (currentIdx == shapeIdIdx) {
+                  shapeId = line.substr(start, end - start);
+                  break;
+                }
+                start = end + 1;
+                end = line.find(',', start);
+                currentIdx++;
+              }
+              if (currentIdx == shapeIdIdx && shapeId.empty())
+                shapeId = line.substr(start);
 
-            if (!shapeId.empty() && allShapeIds.count(shapeId)) {
-              sampledShapePoints[shapeId]++;
-              sampledShapeIds.insert(shapeId);
+              if (!shapeId.empty() && allShapeIds.count(shapeId)) {
+                sampledShapePoints[shapeId]++;
+                sampledShapeIds.insert(shapeId);
+              }
             }
+
+            pos = newlinePos + 1;
+            if (sampledShapeIds.size() >= MAX_SHAPES_TO_SAMPLE)
+              break;
+          }
+          remainder = remainder.substr(pos);
+        }
+        zip_fclose(zf);
+      } else {
+        LOG(WARN) << "Could not open shapes.txt in zip: " << feedPath;
+      }
+      zip_close(za);
+    } else {
+      LOG(WARN) << "Could not open zip file: " << feedPath;
+    }
+  } else
+#endif
+  {
+    // Read from directory
+    std::string shapesPath = feedPath + "/shapes.txt";
+    std::ifstream shapesFile(shapesPath);
+
+    if (shapesFile.is_open()) {
+      std::string line;
+      if (std::getline(shapesFile, line)) {
+        if (!line.empty() && line.back() == '\r')
+          line.pop_back();
+        // Parse Header
+        std::stringstream lss(line);
+        std::string col;
+        int idx = 0;
+        while (std::getline(lss, col, ',')) {
+          if (idx == 0 && col.size() > 3 && col.substr(0, 3) == "\xEF\xBB\xBF")
+            col = col.substr(3);
+          if (col == "shape_id") {
+            shapeIdIdx = idx;
+            break;
+          }
+          idx++;
+        }
+        if (shapeIdIdx == -1)
+          shapeIdIdx = 0;
+
+        while (std::getline(shapesFile, line) &&
+               sampledShapeIds.size() < MAX_SHAPES_TO_SAMPLE) {
+          if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+          std::string shapeId;
+          int currentIdx = 0;
+          size_t start = 0;
+          size_t end = line.find(',');
+          while (end != std::string::npos) {
+            if (currentIdx == shapeIdIdx) {
+              shapeId = line.substr(start, end - start);
+              break;
+            }
+            start = end + 1;
+            end = line.find(',', start);
+            currentIdx++;
+          }
+          if (currentIdx == shapeIdIdx && shapeId.empty())
+            shapeId = line.substr(start);
+
+          if (!shapeId.empty() && allShapeIds.count(shapeId)) {
+            sampledShapePoints[shapeId]++;
+            sampledShapeIds.insert(shapeId);
           }
         }
-        shapesFile.close();
-      } else {
-        LOG(WARN) << "Could not open shapes.txt at: " << shapesPath;
       }
-    }
-
-    LOG(INFO) << "Sampled " << sampledShapeIds.size()
-              << " shapes from shapes.txt";
-
-    // Analyze sampled shapes: calculate average point-to-stop ratio
-    size_t detailedShapes = 0;
-    size_t dummyShapes = 0;
-    double totalRatio = 0;
-    size_t analyzedShapes = 0;
-
-    for (const auto &entry : sampledShapePoints) {
-      const std::string &shapeId = entry.first;
-      size_t points = entry.second;
-
-      if (shapeToStopCount.count(shapeId)) {
-        size_t stops = shapeToStopCount[shapeId];
-        double ratio = (double)points / stops;
-        totalRatio += ratio;
-        analyzedShapes++;
-
-        if (ratio > 5) {
-          detailedShapes++;
-        } else {
-          dummyShapes++;
-        }
-      }
-    }
-
-    double avgRatio = analyzedShapes > 0 ? totalRatio / analyzedShapes : 0;
-    LOG(INFO) << "Shape quality analysis: detailed=" << detailedShapes
-              << " dummy=" << dummyShapes << " avg_ratio=" << avgRatio;
-
-    bool hasDetailedShapes = false;
-    if (analyzedShapes > 0) {
-      hasDetailedShapes = (detailedShapes * 100 / analyzedShapes) > 60;
+      shapesFile.close();
     } else {
-      hasDetailedShapes = true;
-      LOG(INFO) << "Could not sample shapes (input not stored), assuming "
-                   "they are detailed";
+      LOG(WARN) << "Could not open shapes.txt at: " << shapesPath;
     }
+  }
 
-    LOG(INFO) << "Analyzing shape coverage...";
+  LOG(INFO) << "Sampled " << sampledShapeIds.size()
+            << " shapes from shapes.txt";
 
-    size_t totalTrips = 0;
-    size_t tripsWithShapes = 0;
-    for (const auto &trip : feed.getTrips()) {
-      if (mots.count(trip.getRoute()->getType())) {
-        totalTrips++;
-        if (!trip.getShape().empty()) {
-          tripsWithShapes++;
-        }
+  // Analyze sampled shapes: calculate average point-to-stop ratio
+  size_t detailedShapes = 0;
+  size_t dummyShapes = 0;
+  double totalRatio = 0;
+  size_t analyzedShapes = 0;
+
+  for (const auto &entry : sampledShapePoints) {
+    const std::string &shapeId = entry.first;
+    size_t points = entry.second;
+
+    if (shapeToStopCount.count(shapeId)) {
+      size_t stops = shapeToStopCount[shapeId];
+      double ratio = (double)points / stops;
+      totalRatio += ratio;
+      analyzedShapes++;
+
+      if (ratio > 5) {
+        detailedShapes++;
+      } else {
+        dummyShapes++;
       }
     }
+  }
 
-    if (totalTrips == 0)
-      return false;
-    double coverage = (double)tripsWithShapes / totalTrips;
+  double avgRatio = analyzedShapes > 0 ? totalRatio / analyzedShapes : 0;
+  LOG(INFO) << "Shape quality analysis: detailed=" << detailedShapes
+            << " dummy=" << dummyShapes << " avg_ratio=" << avgRatio;
 
-    LOG(INFO) << "Global Smart Shape Drop Check: " << tripsWithShapes << "/"
-              << totalTrips << " trips have shapes (" << (coverage * 100)
-              << "%). "
-              << (hasDetailedShapes ? "Shapes appear DETAILED"
-                                    : "Shapes appear DUMMY/SIMPLE");
+  bool hasDetailedShapes = false;
+  if (analyzedShapes > 0) {
+    hasDetailedShapes = (detailedShapes * 100 / analyzedShapes) > 60;
+  } else {
+    hasDetailedShapes = true;
+    LOG(INFO) << "Could not sample shapes (input not stored), assuming "
+                 "they are detailed";
+  }
 
-    if (coverage > 0.8 && hasDetailedShapes) {
-      LOG(INFO) << "Sufficient quality shape coverage ("
-                << (coverage * 100)
-                << "%). Skipping OSM processing and using existing shapes.";
-      return true;
+  LOG(INFO) << "Analyzing shape coverage...";
+
+  size_t totalTrips = 0;
+  size_t tripsWithShapes = 0;
+  for (const auto &trip : feed.getTrips()) {
+    if (mots.count(trip.getRoute()->getType())) {
+      totalTrips++;
+      if (!trip.getShape().empty()) {
+        tripsWithShapes++;
+      }
     }
+  }
+
+  if (totalTrips == 0)
     return false;
+  double coverage = (double)tripsWithShapes / totalTrips;
+
+  LOG(INFO) << "Global Smart Shape Drop Check: " << tripsWithShapes << "/"
+            << totalTrips << " trips have shapes (" << (coverage * 100)
+            << "%). "
+            << (hasDetailedShapes ? "Shapes appear DETAILED"
+                                  : "Shapes appear DUMMY/SIMPLE");
+
+  if (coverage > 0.8 && hasDetailedShapes) {
+    LOG(INFO) << "Sufficient quality shape coverage (" << (coverage * 100)
+              << "%). Skipping OSM processing and using existing shapes.";
+    return true;
+  }
+  return false;
 }
 
 // _____________________________________________________________________________
@@ -389,6 +391,20 @@ int main(int argc, char **argv) {
     LOG(ERROR) << "No MOT configurations specified and no implicit "
                   "configurations found, see --help.";
     exit(static_cast<int>(RetCode::NO_MOT_CFG));
+  }
+
+  bool isDir = false;
+  if (cfg.feedPaths.size() == 1) {
+    struct stat s;
+    if (stat(cfg.feedPaths[0].c_str(), &s) == 0) {
+      if (s.st_mode & S_IFDIR)
+        isDir = true;
+    }
+  }
+
+  if (cfg.feedPaths.size() > 1 || isDir) {
+    pfaedle::MultiFeedProcessor processor(cfg, motCfgReader.getConfigs());
+    return processor.run();
   }
 
   T_START(gtfsBuild);
@@ -444,7 +460,8 @@ int main(int argc, char **argv) {
     shapesReused = true;
     goto write_output;
   } else if (cfg.smartShapeDrop) {
-    LOG(INFO) << "Smart Shape Drop: Quality check failed. Dropping ALL existing shapes from the feed before generation.";
+    LOG(INFO) << "Smart Shape Drop: Quality check failed. Dropping ALL "
+                 "existing shapes from the feed before generation.";
 
     for (auto &trip : gtfs[0].getTrips()) {
       trip.setShape("");
@@ -759,15 +776,16 @@ write_output:
         std::vector<std::pair<std::string, std::string>> mapping;
         for (const auto &trip : gtfs[0].getTrips()) {
           if (!trip.getShape().empty()) {
-            mapping.push_back(
-                {trip.getShape(), trip.getId()});
+            mapping.push_back({trip.getShape(), trip.getId()});
           }
         }
         if (!mapping.empty()) {
-          LOG(INFO) << "Writing mapping.csv with " << mapping.size() << " entries...";
+          LOG(INFO) << "Writing mapping.csv with " << mapping.size()
+                    << " entries...";
           w.setMapping(mapping);
         } else {
-          LOG(WARN) << "No trips with shapes found - mapping.csv will not be created";
+          LOG(WARN)
+              << "No trips with shapes found - mapping.csv will not be created";
         }
       }
 

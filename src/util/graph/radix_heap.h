@@ -12,36 +12,30 @@
 
 namespace radix_heap {
 namespace internal {
-template <bool Is64bit>
-class find_bucket_impl;
+template <bool Is64bit> class find_bucket_impl;
 
-template <>
-class find_bucket_impl<false> {
- public:
+template <> class find_bucket_impl<false> {
+public:
   static inline constexpr size_t find_bucket(uint32_t x, uint32_t last) {
     return x == last ? 0 : 32 - __builtin_clz(x ^ last);
   }
 };
 
-template <>
-class find_bucket_impl<true> {
- public:
+template <> class find_bucket_impl<true> {
+public:
   static inline constexpr size_t find_bucket(uint64_t x, uint64_t last) {
     return x == last ? 0 : 64 - __builtin_clzll(x ^ last);
   }
 };
 
-template <typename T>
-inline constexpr size_t find_bucket(T x, T last) {
-  return find_bucket_impl<sizeof(T) == 8>::find_bucket(x, last);
+template <typename T> inline constexpr size_t find_bucket(T x, T last) {
+  return find_bucket_impl < sizeof(T) == 8 > ::find_bucket(x, last);
 }
 
-template <typename KeyType, bool IsSigned>
-class encoder_impl_integer;
+template <typename KeyType, bool IsSigned> class encoder_impl_integer;
 
-template <typename KeyType>
-class encoder_impl_integer<KeyType, false> {
- public:
+template <typename KeyType> class encoder_impl_integer<KeyType, false> {
+public:
   typedef KeyType key_type;
   typedef KeyType unsigned_key_type;
 
@@ -50,9 +44,8 @@ class encoder_impl_integer<KeyType, false> {
   inline static constexpr key_type decode(unsigned_key_type x) { return x; }
 };
 
-template <typename KeyType>
-class encoder_impl_integer<KeyType, true> {
- public:
+template <typename KeyType> class encoder_impl_integer<KeyType, true> {
+public:
   typedef KeyType key_type;
   typedef typename std::make_unsigned<KeyType>::type unsigned_key_type;
 
@@ -71,7 +64,7 @@ class encoder_impl_integer<KeyType, true> {
 
 template <typename KeyType, typename UnsignedKeyType>
 class encoder_impl_decimal {
- public:
+public:
   typedef KeyType key_type;
   typedef UnsignedKeyType unsigned_key_type;
 
@@ -90,14 +83,13 @@ class encoder_impl_decimal {
               << (std::numeric_limits<unsigned_key_type>::digits - 1))));
   }
 
- private:
-  template <typename T, typename U>
-  union raw_cast {
-   public:
+private:
+  template <typename T, typename U> union raw_cast {
+  public:
     constexpr raw_cast(T t) : t_(t) {}
     operator U() const { return u_; }
 
-   private:
+  private:
     T t_;
     U u_;
   };
@@ -110,12 +102,12 @@ template <>
 class encoder<float> : public encoder_impl_decimal<float, uint32_t> {};
 template <>
 class encoder<double> : public encoder_impl_decimal<double, uint64_t> {};
-}  // namespace internal
+} // namespace internal
 
 template <typename KeyType, typename ValueType,
           typename EncoderType = internal::encoder<KeyType>>
 class pair_radix_heap {
- public:
+public:
   typedef KeyType key_type;
   typedef ValueType value_type;
   typedef EncoderType encoder_type;
@@ -128,7 +120,7 @@ class pair_radix_heap {
   void push(key_type key, const value_type &value) {
     unsigned_key_type x = encoder_type::encode(key);
     if (last_ > x) {
-      std::cerr << "PQ: not monotone: " << last_ << " vs " << x << std::endl;
+      // std::cerr << "PQ: not monotone: " << last_ << " vs " << x << std::endl;
       x = last_;
     }
     ++size_;
@@ -140,7 +132,7 @@ class pair_radix_heap {
   void push(key_type key, value_type &&value) {
     unsigned_key_type x = encoder_type::encode(key);
     if (last_ > x) {
-      std::cerr << "PQ: not monotone: " << last_ << " vs " << x << std::endl;
+      // std::cerr << "PQ: not monotone: " << last_ << " vs " << x << std::endl;
       x = last_;
     }
     ++size_;
@@ -149,10 +141,10 @@ class pair_radix_heap {
     buckets_min_[k] = std::min(buckets_min_[k], x);
   }
 
-  template <class... Args>
-  void emplace(key_type key, Args &&... args) {
+  template <class... Args> void emplace(key_type key, Args &&...args) {
     unsigned_key_type x = encoder_type::encode(key);
-    if (last_ > x) x = last_;
+    if (last_ > x)
+      x = last_;
     ++size_;
     const size_t k = internal::find_bucket(x, last_);
     buckets_[k].emplace_back(std::piecewise_construct, std::forward_as_tuple(x),
@@ -183,7 +175,8 @@ class pair_radix_heap {
   void clear() {
     size_ = 0;
     last_ = key_type();
-    for (auto &b : buckets_) b.clear();
+    for (auto &b : buckets_)
+      b.clear();
     buckets_min_.fill(std::numeric_limits<unsigned_key_type>::max());
   }
 
@@ -194,7 +187,7 @@ class pair_radix_heap {
     buckets_min_.swap(a.buckets_min_);
   }
 
- private:
+private:
   size_t size_;
   unsigned_key_type last_;
   std::array<std::vector<std::pair<unsigned_key_type, value_type>>,
@@ -206,7 +199,8 @@ class pair_radix_heap {
 
   void pull() {
     assert(size_ > 0);
-    if (!buckets_[0].empty()) return;
+    if (!buckets_[0].empty())
+      return;
 
     size_t i;
     for (i = 1; buckets_[i].empty(); ++i)
@@ -223,4 +217,4 @@ class pair_radix_heap {
     buckets_min_[i] = std::numeric_limits<unsigned_key_type>::max();
   }
 };
-}  // namespace radix_heap
+} // namespace radix_heap
