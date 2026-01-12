@@ -419,7 +419,9 @@ void PBFSource::buildLocationIndex(const util::geo::Box<double> &bbox) {
 
 // _____________________________________________________________________________
 bool PBFSource::anyNodeInBBox(const osmium::Way &way) const {
-  std::lock_guard<std::mutex> lock(_indexMutex);
+  // std::lock_guard<std::mutex> lock(_indexMutex);
+  // Note: Thread-safe without lock during parallel read phase as index is
+  // immutable
   if (!_locationIndex)
     return false;
 
@@ -437,7 +439,9 @@ bool PBFSource::anyNodeInBBox(const osmium::Way &way) const {
 
 // _____________________________________________________________________________
 bool PBFSource::hasNodeLocation(osmid id) const {
-  std::lock_guard<std::mutex> lock(_indexMutex);
+  // std::lock_guard<std::mutex> lock(_indexMutex);
+  // Note: Thread-safe without lock during parallel read phase as index is
+  // immutable
   if (!_locationIndex)
     return false;
 
@@ -451,7 +455,9 @@ bool PBFSource::hasNodeLocation(osmid id) const {
 
 // _____________________________________________________________________________
 bool PBFSource::getNodeLocation(osmid id, double *lat, double *lon) const {
-  std::lock_guard<std::mutex> lock(_indexMutex);
+  // std::lock_guard<std::mutex> lock(_indexMutex);
+  // Note: Thread-safe without lock during parallel read phase as index is
+  // immutable
   if (!_locationIndex)
     return false;
 
