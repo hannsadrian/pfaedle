@@ -56,7 +56,12 @@ public:
   // Read ways in parallel using multiple threads
   // callback is called for each way with the way object and the thread index (0
   // to num_threads-1)
-  void readWaysParallel(std::function<void(const osmium::Way &, int)> callback);
+  // Read ways in parallel using multiple threads, and build location index from
+  // nodes in the same pass. callback is called for each way with the way object
+  // and the thread index (0 to num_threads-1)
+  void readNodesAndWaysParallel(
+      const util::geo::Box<double> &bbox,
+      std::function<void(const osmium::Way &, int)> callback);
 
   virtual util::geo::Box<double> getBounds();
 
@@ -66,7 +71,8 @@ public:
   // Build location index for nodes in the given bounding box
   void buildLocationIndex(const util::geo::Box<double> &bbox);
 
-  // Check if any node of the way is in the bounding box (batch check with single lock)
+  // Check if any node of the way is in the bounding box (batch check with
+  // single lock)
   bool anyNodeInBBox(const osmium::Way &way) const;
 
   // Check if a node location is available in the index

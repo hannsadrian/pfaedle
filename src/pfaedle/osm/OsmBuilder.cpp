@@ -141,35 +141,24 @@ void OsmBuilder::readImpl(source::OsmSource *source, const OsmReadOpts &opts,
   // PBF optimization: use location index
   if (auto pbfSource = dynamic_cast<source::PBFSource *>(source)) {
 
-    // Pass 1: Build location index for bbox nodes and read relations
-    // Note: location index might already be built if smart skip check was
-    // performed
-    if (pbfSource->getLocationIndexSize() == 0) {
-      LOG(DEBUG) << "Pass 1: Building location index and reading relations...";
-      pbfSource->buildLocationIndex(box.getFullBox());
-    } else {
-      LOG(DEBUG)
-          << "Pass 1: Reading relations (location index already built)...";
-    }
-
+    // Pass 1: Read relations first!
+    // We do this first so we know which ways/nodes to keep based on relations
+    LOG(DEBUG) << "Pass 1: Reading relations...";
     readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
              &rawRests);
 
-    // LOG(DEBUG) << "Pass 2: Reading edges with location index...";
-    // readOrphanStationsWithLocationIndex(pbfSource, g, &orphanStations,
-    // intmRels,
-    //                                 nodeRels, filter, box, attrKeys[0],
-    //                                 intmRels.flat, opts);
-
-    // NOTE: Skipping orphan stations scan for performance optimization
-    // Orphan stations are rare (stations not connected to any way)
-    // and scanning for them is expensive (requires full node scan).
     LOG(INFO) << "Skipping orphan stations scan (performance optimization)";
 
-    LOG(DEBUG) << "Pass 3: Reading edges with location index...";
+    LOG(DEBUG)
+        << "Pass 2: Building location index and reading edges in parallel...";
+
+    // This single pass does both:
+    // 1. Builds the location index from Nodes
+    // 2. Processes Ways in parallel using the (now populated) index
+    // Note: This relies on the PBF structure where Nodes appear before Ways.
     readEdgesWithLocationIndex(pbfSource, g, intmRels, wayRels, filter, &nodes,
                                &multNodes, noHupNodes, attrKeys[1], rawRests,
-                               res, intmRels.flat, &eTracks, opts);
+                               res, intmRels.flat, &eTracks, opts, box);
 
   } else {
     LOG(DEBUG) << "Using standard 4-pass reading...";
@@ -853,14 +842,13 @@ void OsmBuilder::readEdgesWithLocationIndex(
     const OsmFilter &filter, NIdMap *nodes, NIdMultMap *multiNodes,
     const OsmIdSet &noHupNodes, const AttrKeySet &keepAttrs,
     const Restrictions &rawRests, Restrictor *restor, const FlatRels &fl,
-    EdgTracks *eTracks, const OsmReadOpts &opts) {
+    EdgTracks *eTracks, const OsmReadOpts &opts, const BBoxIdx &bbox) {
 
-  // The location index already contains only bbox nodes, so we can use
-  // source->hasNodeLocation() as a proxy for bBoxNodes.has()
-  // No need to build a separate bBoxNodes set!
+  // The location index is built on the fly in the same pass!
+  // No separate build or seek steps needed.
 
-  LOG(INFO) << "Reading ways from OSM file...";
-  source->seekWays();
+  LOG(INFO) << "Reading nodes (building index) and ways from OSM file in "
+               "parallel...";
 
   int num_threads = std::thread::hardware_concurrency();
 
@@ -874,106 +862,107 @@ void OsmBuilder::readEdgesWithLocationIndex(
   LOG(INFO) << "Reading ways in parallel using " << num_threads
             << " threads...";
 
-  source->readWaysParallel([&](const osmium::Way &way, int /*thread_id*/) {
-    total_ways++;
+  source->readNodesAndWaysParallel(
+      bbox.getFullBox(), [&](const osmium::Way &way, int /*thread_id*/) {
+        total_ways++;
 
-    // 1. Fast BBox Check
-    if (!source->anyNodeInBBox(way))
-      return;
+        // 1. Fast BBox Check
+        if (!source->anyNodeInBBox(way))
+          return;
 
-    // 2. Filter Check
-    AttrMap attrs;
-    for (const auto &tag : way.tags()) {
-      if (keepAttrs.count(tag.key())) {
-        attrs[tag.key()] = tag.value();
-      }
-    }
-
-    bool passesFilter = (relKeep(way.id(), wayRels, fl) ||
-                         filter.keep(attrs, OsmFilter::WAY)) &&
-                        !filter.drop(attrs, OsmFilter::WAY);
-
-    if (!passesFilter)
-      return;
-
-    kept_ways++;
-
-    // 3. Pre-compute attributes (Parallel, no lock)
-    std::vector<TransitEdgeLine *> lines;
-    if (wayRels.count(way.id())) {
-      lines = getLines(wayRels.find(way.id())->second, rels, opts, source);
-    }
-    std::string track =
-        getAttrByFirstMatch(opts.edgePlatformRules, way.id(), attrs, wayRels,
-                            rels, opts.trackNormzer, source);
-    int level = filter.level(attrs);
-
-    int oneway = 0;
-    if (filter.oneway(attrs)) {
-      oneway = 1;
-    } else if (filter.onewayrev(attrs)) {
-      oneway = 2;
-    }
-
-    // 4. Update Graph (Sequential, locked)
-    // We lock only for the graph modification part.
-    // This avoids buffering millions of ProcessedWay objects.
-    std::lock_guard<std::mutex> lock(graphMutex);
-
-    Node *last = 0;
-    osmid lastnid = 0;
-
-    for (const auto &node : way.nodes()) {
-      osmid nid = node.ref();
-      Node *n = 0;
-      double lat, lon;
-
-      // Get node location from location index
-      if (!source->getNodeLocation(nid, &lat, &lon)) {
-        continue;
-      }
-
-      POINT pos = {lon, lat};
-
-      if (noHupNodes.has(nid)) {
-        n = g->addNd(NodePL(pos));
-        (*multiNodes)[nid].insert(n);
-      } else if (!nodes->count(nid)) {
-        n = g->addNd(NodePL(pos));
-        (*nodes)[nid] = n;
-      } else {
-        n = (*nodes)[nid];
-        const POINT *geom = n->pl().getGeom();
-        if (!geom || (geom->getX() == 0 && geom->getY() == 0)) {
-          n->pl().setGeom(pos);
+        // 2. Filter Check
+        AttrMap attrs;
+        for (const auto &tag : way.tags()) {
+          if (keepAttrs.count(tag.key())) {
+            attrs[tag.key()] = tag.value();
+          }
         }
-      }
 
-      if (last) {
-        auto e = g->addEdg(last, n, EdgePL());
-        if (!e)
-          continue;
+        bool passesFilter = (relKeep(way.id(), wayRels, fl) ||
+                             filter.keep(attrs, OsmFilter::WAY)) &&
+                            !filter.drop(attrs, OsmFilter::WAY);
 
-        processRestr(nid, way.id(), rawRests, e, n, restor);
-        processRestr(lastnid, way.id(), rawRests, e, last, restor);
+        if (!passesFilter)
+          return;
 
-        e->pl().addLines(lines);
-        e->pl().setLvl(level);
-        if (!track.empty())
-          (*eTracks)[e] = track;
+        kept_ways++;
 
-        if (oneway == 1) {
-          e->pl().setOneWay(1);
-          LOG(DEBUG) << "Way " << way.id() << ": Set oneway=1 (forward)";
-        } else if (oneway == 2) {
-          e->pl().setOneWay(2);
-          LOG(DEBUG) << "Way " << way.id() << ": Set oneway=2 (reverse)";
+        // 3. Pre-compute attributes (Parallel, no lock)
+        std::vector<TransitEdgeLine *> lines;
+        if (wayRels.count(way.id())) {
+          lines = getLines(wayRels.find(way.id())->second, rels, opts, source);
         }
-      }
-      lastnid = nid;
-      last = n;
-    }
-  });
+        std::string track =
+            getAttrByFirstMatch(opts.edgePlatformRules, way.id(), attrs,
+                                wayRels, rels, opts.trackNormzer, source);
+        int level = filter.level(attrs);
+
+        int oneway = 0;
+        if (filter.oneway(attrs)) {
+          oneway = 1;
+        } else if (filter.onewayrev(attrs)) {
+          oneway = 2;
+        }
+
+        // 4. Update Graph (Sequential, locked)
+        // We lock only for the graph modification part.
+        // This avoids buffering millions of ProcessedWay objects.
+        std::lock_guard<std::mutex> lock(graphMutex);
+
+        Node *last = 0;
+        osmid lastnid = 0;
+
+        for (const auto &node : way.nodes()) {
+          osmid nid = node.ref();
+          Node *n = 0;
+          double lat, lon;
+
+          // Get node location from location index
+          if (!source->getNodeLocation(nid, &lat, &lon)) {
+            continue;
+          }
+
+          POINT pos = {lon, lat};
+
+          if (noHupNodes.has(nid)) {
+            n = g->addNd(NodePL(pos));
+            (*multiNodes)[nid].insert(n);
+          } else if (!nodes->count(nid)) {
+            n = g->addNd(NodePL(pos));
+            (*nodes)[nid] = n;
+          } else {
+            n = (*nodes)[nid];
+            const POINT *geom = n->pl().getGeom();
+            if (!geom || (geom->getX() == 0 && geom->getY() == 0)) {
+              n->pl().setGeom(pos);
+            }
+          }
+
+          if (last) {
+            auto e = g->addEdg(last, n, EdgePL());
+            if (!e)
+              continue;
+
+            processRestr(nid, way.id(), rawRests, e, n, restor);
+            processRestr(lastnid, way.id(), rawRests, e, last, restor);
+
+            e->pl().addLines(lines);
+            e->pl().setLvl(level);
+            if (!track.empty())
+              (*eTracks)[e] = track;
+
+            if (oneway == 1) {
+              e->pl().setOneWay(1);
+              LOG(DEBUG) << "Way " << way.id() << ": Set oneway=1 (forward)";
+            } else if (oneway == 2) {
+              e->pl().setOneWay(2);
+              LOG(DEBUG) << "Way " << way.id() << ": Set oneway=2 (reverse)";
+            }
+          }
+          lastnid = nid;
+          last = n;
+        }
+      });
 
   LOG(INFO) << "Parallel read complete. Processed " << total_ways
             << " ways, kept " << kept_ways << ". Graph built.";
