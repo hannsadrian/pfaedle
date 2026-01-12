@@ -143,13 +143,11 @@ void OsmBuilder::readImpl(source::OsmSource *source, const OsmReadOpts &opts,
 
     // Pass 1: Read relations first!
     // We do this first so we know which ways/nodes to keep based on relations
-    LOG(DEBUG) << "Pass 1: Reading relations...";
+    LOG(INFO) << "Pass 1: Reading relations...";
     readRels(source, &intmRels, &nodeRels, &wayRels, filter, attrKeys[2],
              &rawRests);
 
-    LOG(INFO) << "Skipping orphan stations scan (performance optimization)";
-
-    LOG(DEBUG)
+    LOG(INFO)
         << "Pass 2: Building location index and reading edges in parallel...";
 
     // This single pass does both:
@@ -849,6 +847,12 @@ void OsmBuilder::readEdgesWithLocationIndex(
 
   LOG(INFO) << "Reading nodes (building index) and ways from OSM file in "
                "parallel...";
+
+  LOG(INFO) << "Bounding box: http://bboxfinder.com/#" << std::fixed
+            << std::setprecision(6) << bbox.getFullBox().getLowerLeft().getY()
+            << "," << bbox.getFullBox().getLowerLeft().getX() << ","
+            << bbox.getFullBox().getUpperRight().getY() << ","
+            << bbox.getFullBox().getUpperRight().getX();
 
   int num_threads = std::thread::hardware_concurrency();
 
