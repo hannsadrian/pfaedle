@@ -8,6 +8,7 @@
 #include <regex>
 #include <string>
 #include <unordered_map>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,7 @@ class Normalizer {
   ReplRulesComp _rules;
   ReplRules _rulesOrig;
   mutable std::unordered_map<std::string, std::string> _cache;
+  mutable std::mutex _cacheMutex;
 
   void buildRules(const ReplRules& rules);
 };

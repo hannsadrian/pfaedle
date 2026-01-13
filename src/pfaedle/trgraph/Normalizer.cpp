@@ -38,8 +38,11 @@ Normalizer& Normalizer::operator=(Normalizer other) {
 
 // _____________________________________________________________________________
 std::string Normalizer::norm(const std::string& sn) const {
-  auto i = _cache.find(sn);
-  if (i != _cache.end()) return i->second;
+  {
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    auto i = _cache.find(sn);
+    if (i != _cache.end()) return i->second;
+  }
 
   std::string ret = sn;
   for (auto rule : _rules) {
@@ -52,7 +55,10 @@ std::string Normalizer::norm(const std::string& sn) const {
 
   std::transform(ret.begin(), ret.end(), ret.begin(), ::tolower);
 
-  _cache[sn] = ret;
+  {
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    _cache[sn] = ret;
+  }
 
   return ret;
 }
