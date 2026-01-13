@@ -27,7 +27,8 @@ struct Config {
         noFastHops(false), noAStar(false), noTrie(false), noHopCache(false),
         writeStats(false), parseAdditionalGTFSFields(false),
         gridSize(2000 / util::geo::M_PER_DEG), boxPadding(20000),
-        gaussianNoise(0), verbosity(0), smartShapeDrop(false) {}
+        gaussianNoise(0), verbosity(0), smartShapeDrop(false),
+        forceMultiFeed(false) {}
   std::string dbgOutputPath;
   std::string solveMethod;
   std::string shapeTripId;
@@ -58,6 +59,7 @@ struct Config {
   double gaussianNoise;
   uint8_t verbosity;
   bool smartShapeDrop;
+  bool forceMultiFeed;
 
   std::string toString() {
     std::stringstream ss;
@@ -84,6 +86,7 @@ struct Config {
        << "parse-additional-gtfs-fields: " << parseAdditionalGTFSFields << "\n"
        << "write-stats: " << writeStats << "\n"
        << "smart-shape-drop: " << smartShapeDrop << "\n"
+       << "force-multi-feed: " << forceMultiFeed << "\n"
        << "feed-paths: ";
 
     for (const auto &p : feedPaths) {

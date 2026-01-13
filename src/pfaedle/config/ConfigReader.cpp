@@ -48,6 +48,10 @@ void ConfigReader::help(const char *bin) {
             << "drop shapes only if dataset is small or\n"
             << std::setw(35) << " "
             << "  shapes are missing (>20%)\n"
+            << std::setw(35) << "  -M [ --multi-feed ]"
+            << "force multi-feed mode with directory output\n"
+            << std::setw(35) << " "
+            << "  even for single feed\n"
             << std::setw(35) << "  --write-colors"
             << "write matched route line colors, where missing\n"
             << "\nInput:\n"
@@ -136,6 +140,7 @@ void ConfigReader::read(Config *cfg, int argc, char **argv) {
                          {"osm-file", required_argument, 0, 'x'},
                          {"drop-shapes", required_argument, 0, 'D'},
                          {"smart-shape-drop", no_argument, 0, 'S'},
+                         {"multi-feed", no_argument, 0, 'M'},
                          {"mots", required_argument, NULL, 'm'},
                          {"grid-size", required_argument, 0, 'g'},
                          {"box-padding", required_argument, 0, 'b'},
@@ -161,7 +166,7 @@ void ConfigReader::read(Config *cfg, int argc, char **argv) {
                          {0, 0, 0, 0}};
 
   int c;
-  while ((c = getopt_long(argc, argv, ":o:hvi:c:x:DSm:g:X:T:d:pP:FWb:", ops,
+  while ((c = getopt_long(argc, argv, ":o:hvi:c:x:DSMm:g:X:T:d:pP:FWb:", ops,
                           0)) != -1) {
     switch (c) {
     case 1:
@@ -197,6 +202,9 @@ void ConfigReader::read(Config *cfg, int argc, char **argv) {
     case 'S':
       cfg->smartShapeDrop = true;
       cfg->dropShapes = true;
+      break;
+    case 'M':
+      cfg->forceMultiFeed = true;
       break;
     case 'm':
       motStr = optarg;

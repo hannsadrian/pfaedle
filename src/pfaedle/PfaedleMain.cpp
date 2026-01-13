@@ -402,7 +402,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (cfg.feedPaths.size() > 1 || isDir) {
+  if (cfg.feedPaths.size() > 1 || isDir || cfg.forceMultiFeed) {
     pfaedle::MultiFeedProcessor processor(cfg, motCfgReader.getConfigs());
     return processor.run();
   }
