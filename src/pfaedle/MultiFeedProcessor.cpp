@@ -1,6 +1,7 @@
 #include "pfaedle/MultiFeedProcessor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <dirent.h>
 #include <sstream>
 #include <string.h>
@@ -22,6 +23,118 @@
 #include "pfaedle/router/Stats.h"
 #include "util/geo/Geo.h"
 #include "util/log/Log.h"
+
+namespace {
+
+struct LatLon {
+  double lat;
+  double lon;
+};
+
+static constexpr double kPi = 3.14159265358979323846;
+static double deg2rad(double d) { return d * kPi / 180.0; }
+
+
+// Distance in km.
+static double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+  // Mean earth radius in km.
+  constexpr double R = 6371.0088;
+  const double dLat = deg2rad(lat2 - lat1);
+  const double dLon = deg2rad(lon2 - lon1);
+  const double a = std::sin(dLat / 2) * std::sin(dLat / 2) +
+                   std::cos(deg2rad(lat1)) * std::cos(deg2rad(lat2)) *
+                       std::sin(dLon / 2) * std::sin(dLon / 2);
+  const double c = 2 * std::atan2(std::sqrt(a), std::sqrt(1 - a));
+  return R * c;
+}
+
+static pfaedle::osm::BBoxIdx bboxFromPoints(const std::vector<LatLon> &pts,
+                                           double padding) {
+  pfaedle::osm::BBoxIdx box(padding);
+  for (const auto &p : pts) {
+    box.add(util::geo::Box<double>(util::geo::DPoint(p.lon, p.lat),
+                                   util::geo::DPoint(p.lon, p.lat)));
+  }
+  return box;
+}
+
+static void splitByLargestGap(const std::vector<LatLon> &pts, bool splitLon,
+                              double *bestGapKm, size_t *bestIdx,
+                              std::vector<LatLon> *sorted) {
+  *sorted = pts;
+  std::sort(sorted->begin(), sorted->end(), [&](const LatLon &a, const LatLon &b) {
+    return splitLon ? (a.lon < b.lon) : (a.lat < b.lat);
+  });
+
+  double gapKm = 0.0;
+  size_t gapIdx = 0;
+  for (size_t i = 0; i + 1 < sorted->size(); ++i) {
+    const auto &p1 = (*sorted)[i];
+    const auto &p2 = (*sorted)[i + 1];
+    const double d = haversineKm(p1.lat, p1.lon, p2.lat, p2.lon);
+    if (d > gapKm) {
+      gapKm = d;
+      gapIdx = i + 1; // split before this index
+    }
+  }
+  *bestGapKm = gapKm;
+  *bestIdx = gapIdx;
+}
+
+// Recursively split points into up to maxBoxes clusters when there is a very
+// large geographic gap. Returns clusters in out.
+static void clusterPointsByGap(const std::vector<LatLon> &pts,
+                               std::vector<std::vector<LatLon>> *out,
+                               size_t maxBoxes, double gapThresholdKm,
+                               size_t minClusterSize) {
+  if (pts.empty()) return;
+  if (out->size() >= maxBoxes) {
+    out->push_back(pts);
+    return;
+  }
+
+  // Compute extents.
+  double minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+  for (const auto &p : pts) {
+    minLat = std::min(minLat, p.lat);
+    maxLat = std::max(maxLat, p.lat);
+    minLon = std::min(minLon, p.lon);
+    maxLon = std::max(maxLon, p.lon);
+  }
+
+  // Decide split dimension by larger spread in km-ish.
+  const double latSpanKm = (maxLat - minLat) * 111.0;
+  const double lonSpanKm = (maxLon - minLon) * 111.0 *
+                           std::max(0.1, std::cos(deg2rad((minLat + maxLat) / 2)));
+  const bool splitLon = lonSpanKm > latSpanKm;
+
+  double bestGapKm = 0.0;
+  size_t splitIdx = 0;
+  std::vector<LatLon> sorted;
+  splitByLargestGap(pts, splitLon, &bestGapKm, &splitIdx, &sorted);
+
+  if (bestGapKm < gapThresholdKm || splitIdx == 0 || splitIdx >= sorted.size()) {
+    out->push_back(pts);
+    return;
+  }
+
+  std::vector<LatLon> a(sorted.begin(), sorted.begin() + splitIdx);
+  std::vector<LatLon> b(sorted.begin() + splitIdx, sorted.end());
+
+  // If one cluster is tiny, treat it as outlier and keep only the large one.
+  // This prevents a single stray stop from exploding the bbox.
+  const size_t n = sorted.size();
+  const size_t small = std::min(a.size(), b.size());
+  if (small < minClusterSize || (small * 100) / std::max<size_t>(1, n) < 2) {
+    out->push_back(a.size() >= b.size() ? a : b);
+    return;
+  }
+
+  clusterPointsByGap(a, out, maxBoxes, gapThresholdKm, minClusterSize);
+  clusterPointsByGap(b, out, maxBoxes, gapThresholdKm, minClusterSize);
+}
+
+} // namespace
 
 // Forward declare logic from PfaedleMain potentially?
 // No, we reimplement clean logic here or call existing libraries.
@@ -97,6 +210,7 @@ void MultiFeedProcessor::scanFeeds() {
 void MultiFeedProcessor::buildGraphs() {
   // 1. Calculate Union BBox
   pfaedle::osm::BBoxIdx unionBox(_cfg.boxPadding);
+  std::vector<LatLon> unionPts;
 
   LOG(INFO) << "Calculating Union Bounding Box across " << _feedPaths.size()
             << " feeds...";
@@ -277,6 +391,7 @@ void MultiFeedProcessor::buildGraphs() {
               unionBox.add(
                   util::geo::Box<double>(util::geo::DPoint(s.lon, s.lat),
                                          util::geo::DPoint(s.lon, s.lat)));
+              unionPts.push_back({s.lat, s.lon});
               if (s.lat < minLat) {
                 minLat = s.lat;
                 minLatStop = s.id + " / " + s.name + " (" +
@@ -331,60 +446,95 @@ void MultiFeedProcessor::buildGraphs() {
             << unionBox.getFullBox().getUpperRight().getY() << ","
             << unionBox.getFullBox().getUpperRight().getX();
 
+  // If stop coordinates contain multiple far-apart clusters (e.g. an overseas
+  // outlier feed), split into multiple bboxes to avoid exploding the OSM crop.
+  // Heuristic thresholds (can be made configurable later):
+  // - split when a largest geographic gap exceeds ~1000 km
+  // - ignore tiny clusters (<2% or <250 points) as outliers
+  std::vector<pfaedle::osm::BBoxIdx> bboxes;
+  if (!unionPts.empty()) {
+    std::vector<std::vector<LatLon>> clusters;
+    clusterPointsByGap(unionPts, &clusters, /*maxBoxes*/ 4,
+                       /*gapThresholdKm*/ 1000.0,
+                       /*minClusterSize*/ 250);
+    for (const auto &c : clusters) {
+      bboxes.push_back(bboxFromPoints(c, _cfg.boxPadding));
+    }
+  }
+  if (bboxes.empty()) {
+    bboxes.push_back(unionBox);
+  }
+  if (bboxes.size() > 1) {
+    LOG(WARN) << "Stop coordinates form multiple far-apart clusters; splitting "
+                 "OSM crop into "
+              << bboxes.size() << " bounding boxes to avoid huge graphs.";
+    for (size_t i = 0; i < bboxes.size(); ++i) {
+      const auto &bb = bboxes[i].getFullBox();
+      LOG(INFO) << "BBox[" << i << "]: " << bb.getLowerLeft().getY() << ","
+                << bb.getLowerLeft().getX() << " to "
+                << bb.getUpperRight().getY() << "," << bb.getUpperRight().getX();
+    }
+  }
+
   // 2. Build Graphs per MotConfig
   for (auto &motCfg :
        const_cast<std::vector<config::MotConfig> &>(_motConfigs)) {
     // Use pointer as key
     config::MotConfig *key = &motCfg;
-    if (_bundles.count(key))
-      continue;
+    if (_bundles.count(key)) continue;
 
-    GraphBundle bundle;
-    bundle.graph = std::make_shared<pfaedle::trgraph::Graph>();
-    bundle.restrictor = std::make_shared<pfaedle::osm::Restrictor>();
+    std::vector<GraphBundle> bundles;
+    bundles.reserve(bboxes.size());
 
-    std::string osmPath =
-        motCfg.osmPath.empty() ? _cfg.osmPath : motCfg.osmPath;
-    LOG(INFO) << "---- Building Graph for MOT Config ["
-              << pfaedle::router::getMotStr(motCfg.mots) << "] using OSM "
-              << osmPath << " ...";
+    std::string osmPath = motCfg.osmPath.empty() ? _cfg.osmPath : motCfg.osmPath;
     if (osmPath.empty()) {
       throw std::runtime_error("No OSM path provided for MOT Config");
     }
 
-    pfaedle::osm::OsmBuilder osmBuilder;
-    osmBuilder.read(osmPath, motCfg.osmBuildOpts, bundle.graph.get(), unionBox,
-                    _cfg.gridSize, bundle.restrictor.get());
+    for (size_t bbIdx = 0; bbIdx < bboxes.size(); ++bbIdx) {
+      GraphBundle bundle;
+      bundle.graph = std::make_shared<pfaedle::trgraph::Graph>();
+      bundle.restrictor = std::make_shared<pfaedle::osm::Restrictor>();
+      bundle.bbox = bboxes[bbIdx];
 
-    // Build Indexes
-    LOG(INFO) << "Building Spatial Index (Grids)...";
-    bundle.eGrid = std::make_shared<pfaedle::trgraph::EdgeGrid>(
-        _cfg.gridSize, _cfg.gridSize, unionBox.getFullBox(), false);
-    bundle.nGrid = std::make_shared<pfaedle::trgraph::NodeGrid>(
-        _cfg.gridSize, _cfg.gridSize, unionBox.getFullBox(), false);
-    bundle.bbox = unionBox;
+      LOG(INFO) << "---- Building Graph for MOT Config ["
+                << pfaedle::router::getMotStr(motCfg.mots) << "] using OSM "
+                << osmPath << " (bbox " << (bbIdx + 1) << "/" << bboxes.size()
+                << ") ...";
 
-    // Populate Grids
-    auto &eGrid = *bundle.eGrid;
-    auto &nGrid = *bundle.nGrid;
+      pfaedle::osm::OsmBuilder osmBuilder;
+      osmBuilder.read(osmPath, motCfg.osmBuildOpts, bundle.graph.get(),
+                      bundle.bbox, _cfg.gridSize, bundle.restrictor.get());
 
-    for (auto *n : bundle.graph->getNds()) {
-      for (auto *e : n->getAdjListOut()) {
-        if (e->pl().lvl() > motCfg.osmBuildOpts.maxSnapLevel)
-          continue;
-        if (e->pl().oneWay() == 2)
-          continue;
-        eGrid.add(*e->pl().getGeom(), e);
+      // Build Indexes
+      LOG(INFO) << "Building Spatial Index (Grids)...";
+      bundle.eGrid = std::make_shared<pfaedle::trgraph::EdgeGrid>(
+          _cfg.gridSize, _cfg.gridSize, bundle.bbox.getFullBox(), false);
+      bundle.nGrid = std::make_shared<pfaedle::trgraph::NodeGrid>(
+          _cfg.gridSize, _cfg.gridSize, bundle.bbox.getFullBox(), false);
+
+      // Populate Grids
+      auto &eGrid = *bundle.eGrid;
+      auto &nGrid = *bundle.nGrid;
+
+      for (auto *n : bundle.graph->getNds()) {
+        for (auto *e : n->getAdjListOut()) {
+          if (e->pl().lvl() > motCfg.osmBuildOpts.maxSnapLevel) continue;
+          if (e->pl().oneWay() == 2) continue;
+          eGrid.add(*e->pl().getGeom(), e);
+        }
       }
+
+      for (auto *n : bundle.graph->getNds()) {
+        if (n->pl().getSI()) {
+          nGrid.add(*n->pl().getGeom(), n);
+        }
+      }
+
+      bundles.push_back(bundle);
     }
 
-    for (auto *n : bundle.graph->getNds()) {
-      if (n->pl().getSI()) {
-        nGrid.add(*n->pl().getGeom(), n);
-      }
-    }
-
-    _bundles[key] = bundle;
+    _bundles[key] = std::move(bundles);
   }
 }
 
@@ -508,11 +658,11 @@ void MultiFeedProcessor::processSingleFeed(int feedIdx) {
     LOG(INFO) << "Matching MOTs: " << pfaedle::router::getMotStr(usedMots);
 
     // GET PRE-BUILT BUNDLE
-    if (!_bundles.count(&motCfg)) {
+    if (!_bundles.count(&motCfg) || _bundles[&motCfg].empty()) {
       LOG(ERROR) << "No graph bundle for MOT Config!";
       continue;
     }
-    auto &bundle = _bundles[&motCfg];
+    auto &bundles = _bundles[&motCfg];
 
     pfaedle::router::FeedStops fStops =
         pfaedle::router::writeMotStops(&feed, usedMots, _cfg.shapeTripId);
@@ -560,14 +710,21 @@ void MultiFeedProcessor::processSingleFeed(int feedIdx) {
       exit(1);
     }
 
-    // ShapeBuilder
-    pfaedle::router::ShapeBuilder shapeBuilder(
+    // Run matching over all bbox-specific graphs. First pass may drop shapes;
+    // subsequent passes must not re-drop/overwrite shapes.
+    for (size_t bbIdx = 0; bbIdx < bundles.size(); ++bbIdx) {
+      auto cfgPass = _cfg;
+      if (bbIdx > 0) cfgPass.dropShapes = false;
+
+      auto &bundle = bundles[bbIdx];
+      pfaedle::router::ShapeBuilder shapeBuilder(
         &feed, usedMots, motCfg, bundle.graph.get(), &fStops,
-        bundle.restrictor.get(), statsimiClassifier, router, _cfg,
+        bundle.restrictor.get(), statsimiClassifier, router, cfgPass,
         bundle.eGrid.get(), bundle.nGrid.get());
 
-    pfaedle::netgraph::Graph ng;
-    shapeBuilder.shapeify(&ng);
+      pfaedle::netgraph::Graph ng;
+      shapeBuilder.shapeify(&ng);
+    }
 
     delete router;
     delete statsimiClassifier;

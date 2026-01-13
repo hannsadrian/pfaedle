@@ -37,7 +37,9 @@ private:
   std::vector<config::MotConfig> _motConfigs;
   std::vector<std::string> _feedPaths;
 
-  std::map<config::MotConfig *, GraphBundle> _bundles;
+  // We may build multiple graph bundles per MOT config if the GTFS stop
+  // coordinates form multiple far-apart clusters (to avoid huge OSM bboxes).
+  std::map<config::MotConfig *, std::vector<GraphBundle>> _bundles;
 
   void scanFeeds();
   void buildGraphs();
