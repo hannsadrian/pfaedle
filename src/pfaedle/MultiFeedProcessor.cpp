@@ -577,7 +577,27 @@ void MultiFeedProcessor::processSingleFeed(int feedIdx) {
   try {
     LOG(INFO) << "Writing output GTFS to " << outPath << " ...";
     pfaedle::gtfs::Writer w;
-    w.setMapping({});
+
+    // Write mapping for all trips that have (new or reused) shapes.
+    // This mirrors the single-feed behavior in PfaedleMain and enables
+    // downstream consumers to map shapes back to trips.
+    std::vector<std::pair<std::string, std::string>> mapping;
+    mapping.reserve(feed.getTrips().size());
+    for (const auto &trip : feed.getTrips()) {
+      if (!trip.getShape().empty()) {
+        mapping.push_back({trip.getShape(), trip.getId()});
+      }
+    }
+
+    if (!mapping.empty()) {
+      LOG(INFO) << "Writing mapping.csv with " << mapping.size()
+                << " entries...";
+      w.setMapping(mapping);
+    } else {
+      LOG(WARN)
+          << "No trips with shapes found - mapping.csv will not be created";
+    }
+
     w.write(&feed, outPath);
   } catch (const ad::cppgtfs::WriterException &ex) {
     LOG(ERROR) << "Could not write output GTFS feed: " << ex.what();

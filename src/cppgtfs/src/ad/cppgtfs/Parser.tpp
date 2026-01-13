@@ -1508,7 +1508,23 @@ void Parser::parseTranslations(gtfs::FEEDB* targetFeed) const {
       parseTranslations(targetFeed, csvp.get());
     }
   } catch (const CsvParserException& e) {
-    throw ParserException(e.getMsg(), e.getFieldName(), e.getLine(), curFile);
+    if (_warnCb) {
+      auto pe = ParserException(e.getMsg(), e.getFieldName(), e.getLine(), curFile);
+      _warnCb(std::string("Ignoring translations.txt due to parse error: ") +
+              pe.what());
+    }
+  } catch (const ParserException& e) {
+    if (_warnCb) {
+      ParserException ee = e;
+      ee.setFileName(curFile);
+      _warnCb(std::string("Ignoring translations.txt due to parse error: ") +
+              ee.what());
+    }
+  } catch (const std::exception& e) {
+    if (_warnCb) {
+      _warnCb("Ignoring translations.txt due to parse error: " +
+              (curFile + ": " + std::string(e.what())));
+    }
   }
 }
 
