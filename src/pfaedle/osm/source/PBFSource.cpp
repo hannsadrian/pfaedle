@@ -272,15 +272,24 @@ void PBFSource::resetWayIterators() {
 void PBFSource::readNodesAndWaysParallel(
     const util::geo::Box<double> &bbox,
     std::function<void(const osmium::Way &, int)> callback) {
+  // Building the index and reading ways concurrently is not safe because the
+  // index would be mutated while worker threads read from it.
+  LOG(util::INFO) << "Building location index...";
+  buildLocationIndex(bbox);
+
+  // Now read ways in parallel using the immutable index.
+  readWaysParallel(std::move(callback));
+}
+
+// _____________________________________________________________________________
+void PBFSource::readWaysParallel(
+    std::function<void(const osmium::Way &, int)> callback) {
   _reader->close();
-  initReader(osmium::osm_entity_bits::node | osmium::osm_entity_bits::way);
+  initReader(osmium::osm_entity_bits::way);
 
-  LOG(util::INFO) << "Building location index and reading ways in parallel...";
-  _locationIndex = std::make_unique<LocationIndex>();
-  size_t nodeCount = 0;
-
-  const int num_threads = std::thread::hardware_concurrency();
+  const int num_threads = std::max(1u, std::thread::hardware_concurrency());
   std::vector<std::thread> threads;
+  threads.reserve(num_threads);
 
   // Thread-safe queue for buffers
   std::queue<osmium::memory::Buffer> buffer_queue;
@@ -290,24 +299,18 @@ void PBFSource::readNodesAndWaysParallel(
   const size_t MAX_QUEUE_SIZE = 10;    // Limit memory usage
   bool done = false;
 
-  // Worker function
   auto worker = [&](int thread_id) {
     while (true) {
       osmium::memory::Buffer buffer;
       {
         std::unique_lock<std::mutex> lock(queue_mutex);
         queue_cv.wait(lock, [&] { return !buffer_queue.empty() || done; });
-
-        if (buffer_queue.empty() && done) {
-          return;
-        }
-
+        if (buffer_queue.empty() && done) return;
         buffer = std::move(buffer_queue.front());
         buffer_queue.pop();
       }
-      producer_cv.notify_one(); // Notify producer that space is available
+      producer_cv.notify_one();
 
-      // Process buffer
       for (const auto &entity : buffer) {
         if (entity.type() == osmium::item_type::way) {
           callback(static_cast<const osmium::Way &>(entity), thread_id);
@@ -316,66 +319,28 @@ void PBFSource::readNodesAndWaysParallel(
     }
   };
 
-  // Start workers
   for (int i = 0; i < num_threads; ++i) {
     threads.emplace_back(worker, i);
   }
 
   // Producer (main thread)
   while (osmium::memory::Buffer buffer = _reader->read()) {
-    // 1. Process Nodes (Sequential, Main Thread)
-    // We iterate manually to avoid overhead of osmium::apply if possible,
-    // but using the iterator interface is clean.
-    for (const auto &entity : buffer) {
-      if (entity.type() == osmium::item_type::node) {
-        const auto &node = static_cast<const osmium::Node &>(entity);
-        util::geo::Point<double> pt(node.location().lon(),
-                                    node.location().lat());
-        if (util::geo::contains(pt, bbox)) {
-          _locationIndex->set(node.positive_id(), node.location());
-          nodeCount++;
-        }
-      }
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      producer_cv.wait(lock,
+                       [&] { return buffer_queue.size() < MAX_QUEUE_SIZE; });
+      buffer_queue.push(std::move(buffer));
     }
-
-    // 2. Queue for Ways (Parallel)
-    // We only queue if there are ways, or we just queue everything and let
-    // workers filter? Queuing everything is safer for mixed buffers. However,
-    // if we know a buffer is Node-only, we could skip queuing to save overhead.
-    // PBF blocks are usually monotype.
-    bool has_ways = false;
-    for (const auto &entity : buffer) {
-      if (entity.type() == osmium::item_type::way) {
-        has_ways = true;
-        break;
-      }
-    }
-
-    if (has_ways) {
-      {
-        std::unique_lock<std::mutex> lock(queue_mutex);
-        // Wait if queue is full
-        producer_cv.wait(lock,
-                         [&] { return buffer_queue.size() < MAX_QUEUE_SIZE; });
-        buffer_queue.push(std::move(buffer));
-      }
-      queue_cv.notify_one();
-    }
+    queue_cv.notify_one();
   }
 
-  // Signal completion
   {
     std::lock_guard<std::mutex> lock(queue_mutex);
     done = true;
   }
   queue_cv.notify_all();
 
-  // Join threads
-  for (auto &t : threads) {
-    t.join();
-  }
-
-  LOG(util::INFO) << "Location index built with " << nodeCount << " nodes";
+  for (auto &t : threads) t.join();
 
   _curNode = nullptr;
   _curWay = nullptr;

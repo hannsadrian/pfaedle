@@ -866,8 +866,12 @@ void OsmBuilder::readEdgesWithLocationIndex(
   LOG(INFO) << "Reading ways in parallel using " << num_threads
             << " threads...";
 
-  source->readNodesAndWaysParallel(
-      bbox.getFullBox(), [&](const osmium::Way &way, int /*thread_id*/) {
+  // Build the location index first (must be immutable during parallel way
+  // processing to avoid data races / crashes).
+  source->buildLocationIndex(bbox.getFullBox());
+
+  source->readWaysParallel(
+      [&](const osmium::Way &way, int /*thread_id*/) {
         total_ways++;
 
         // 1. Fast BBox Check

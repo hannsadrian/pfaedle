@@ -56,9 +56,14 @@ public:
   // Read ways in parallel using multiple threads
   // callback is called for each way with the way object and the thread index (0
   // to num_threads-1)
-  // Read ways in parallel using multiple threads, and build location index from
-  // nodes in the same pass. callback is called for each way with the way object
-  // and the thread index (0 to num_threads-1)
+  // Read ways in parallel using multiple threads. Requires a built location
+  // index (buildLocationIndex).
+  void readWaysParallel(std::function<void(const osmium::Way &, int)> callback);
+
+  // Read ways in parallel and build location index for nodes in bbox.
+  // Note: Building the index and reading ways concurrently is not safe because
+  // the index is mutated while worker threads read from it. This method builds
+  // the index first and then reads ways in parallel.
   void readNodesAndWaysParallel(
       const util::geo::Box<double> &bbox,
       std::function<void(const osmium::Way &, int)> callback);
