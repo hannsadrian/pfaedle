@@ -301,26 +301,18 @@ void MultiFeedProcessor::buildGraphs() {
         zip_fclose(zf);
 
         if (!allStops.empty()) {
-          // Identify candidates (top 100 in each direction)
+          // Identify candidates (check ALL stops for usage)
           std::unordered_map<std::string, int> candTrips;
-          auto addCands = [&](auto cmp) {
-            std::sort(allStops.begin(), allStops.end(), cmp);
-            for (int i = 0; i < std::min((int)allStops.size(), 100); ++i)
-              candTrips[allStops[i].id] = 0;
-            for (int i = 0; i < std::min((int)allStops.size(), 100); ++i)
-              candTrips[allStops[allStops.size() - 1 - i].id] = 0;
-          };
-          addCands([](const StopCand &a, const StopCand &b) {
-            return a.lat < b.lat;
-          });
-          addCands([](const StopCand &a, const StopCand &b) {
-            return a.lon < b.lon;
-          });
+          candTrips.reserve(allStops.size());
+          // Populate map with all stop IDs to track counts
+          for (const auto &s : allStops) {
+            candTrips[s.id] = 0;
+          }
 
           zf = zip_fopen(z, "stop_times.txt", 0);
           if (zf) {
-            LOG(INFO) << "Verifying " << candTrips.size()
-                      << " candidates in stop_times.txt...";
+            LOG(INFO) << "Verifying usage of " << candTrips.size()
+                      << " stops in stop_times.txt...";
             remainder.clear();
             headerParsed = false;
             int stopIdIdx = -1;
@@ -385,12 +377,13 @@ void MultiFeedProcessor::buildGraphs() {
 
           double minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
           std::string minLatStop, maxLatStop, minLonStop, maxLonStop;
+          size_t keptCount = 0;
           for (const auto &s : allStops) {
             auto it = candTrips.find(s.id);
             if (it != candTrips.end() && it->second >= 3) {
-              unionBox.add(
-                  util::geo::Box<double>(util::geo::DPoint(s.lon, s.lat),
-                                         util::geo::DPoint(s.lon, s.lat)));
+              keptCount++;
+              // Don't add to unionBox yet, let clustering handle that.
+              // Just collect points.
               unionPts.push_back({s.lat, s.lon});
               if (s.lat < minLat) {
                 minLat = s.lat;
@@ -414,10 +407,16 @@ void MultiFeedProcessor::buildGraphs() {
               }
             }
           }
-          LOG(INFO) << "Feed extremes: Lat " << minLat << " (" << minLatStop
-                    << ") to " << maxLat << " (" << maxLatStop << "), Lon "
-                    << minLon << " (" << minLonStop << ") to " << maxLon << " ("
-                    << maxLonStop << ")";
+          if (keptCount > 0) {
+            LOG(INFO) << "Kept " << keptCount << " stops (>= 3 trips) out of "
+                      << allStops.size();
+            LOG(INFO) << "Feed extremes: Lat " << minLat << " (" << minLatStop
+                      << ") to " << maxLat << " (" << maxLatStop << "), Lon "
+                      << minLon << " (" << minLonStop << ") to " << maxLon
+                      << " (" << maxLonStop << ")";
+          } else {
+             LOG(WARN) << "No stops found with >= 3 trips.";
+          }
         }
         fastSuccess = true;
       }

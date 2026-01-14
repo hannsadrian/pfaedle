@@ -628,11 +628,11 @@ ShapeBuilder::getGtfsShape(const EdgeListHops &hops, Trip *t, size_t numOthers,
       fallbackCount++;
   }
 
-  // Heuristic: if more than 20% of segments are straight lines, drop the shape
-  if (hops.size() > 0 && fallbackCount > hops.size() * 0.2) {
-    // LOG(WARN) << "Dropping shape for trip " << t->getId()
-    //           << " because matching failed for " << fallbackCount << "/"
-    //           << hops.size() << " segments.";
+  // Heuristic: if more than 80% of segments are straight lines, drop the shape
+  if (hops.size() > 0 && fallbackCount > hops.size() * 1.8) {
+    LOG(WARN) << "Dropping shape for trip " << t->getId()
+              << " because matching failed for " << fallbackCount << "/"
+              << hops.size() << " segments.";
     return ret; // Returns shape with no points, which will be ignored by
                 // setShape
   }
