@@ -1508,7 +1508,9 @@ void Parser::parseTranslations(gtfs::FEEDB* targetFeed) const {
       parseTranslations(targetFeed, csvp.get());
     }
   } catch (const CsvParserException& e) {
-    throw ParserException(e.getMsg(), e.getFieldName(), e.getLine(), curFile);
+    if (_warnCb) _warnCb( "Could not parse translations.txt, reason was: " + e.getMsg());
+  } catch (const ParserException& e) {
+    if (_warnCb) _warnCb( "Could not parse translations.txt, reason was: " + std::string(e.what()));
   }
 }
 
