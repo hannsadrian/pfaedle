@@ -1274,11 +1274,13 @@ void ShapeBuilder::shapeWorker(
                 t);
           }
 
-          if (!t->getShape().empty() && (*shpUse)[t->getShape()] > 0) {
-            (*shpUse)[t->getShape()]--;
-            if ((*shpUse)[t->getShape()] == 0) {
-              std::lock_guard<std::mutex> guard(_shpMutex);
-              _feed->getShapes().remove(t->getShape());
+          if (!t->getShape().empty()) {
+            std::lock_guard<std::mutex> guard(_shpMutex);
+            if ((*shpUse)[t->getShape()] > 0) {
+              (*shpUse)[t->getShape()]--;
+              if ((*shpUse)[t->getShape()] == 0) {
+                _feed->getShapes().remove(t->getShape());
+              }
             }
           }
 

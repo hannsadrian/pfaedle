@@ -434,6 +434,19 @@ void MultiFeedProcessor::buildGraphs() {
 
         pfaedle::router::ShapeBuilder::getGtfsBox(
             &feed, _cfg.mots, "", _cfg.dropShapes, &unionBox, 0, nullptr, 0);
+
+        std::unordered_map<const ad::cppgtfs::gtfs::Stop *, bool> seenStops;
+        for (const auto &t : feed.getTrips()) {
+          if (_cfg.mots.count(t.getRoute()->getType())) {
+            for (const auto &st : t.getStopTimes()) {
+              if (!seenStops.count(st.getStop())) {
+                seenStops[st.getStop()] = true;
+                unionPts.push_back(
+                    {st.getStop()->getLat(), st.getStop()->getLng()});
+              }
+            }
+          }
+        }
       } catch (const std::exception &e) {
         LOG(WARN) << "Failed to parse feed for BBox: " << path << " - "
                   << e.what();
