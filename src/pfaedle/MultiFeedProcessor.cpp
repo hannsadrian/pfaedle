@@ -126,7 +126,12 @@ static void clusterPointsByGap(const std::vector<LatLon> &pts,
   const size_t n = sorted.size();
   const size_t small = std::min(a.size(), b.size());
   if (small < minClusterSize || (small * 100) / std::max<size_t>(1, n) < 2) {
-    out->push_back(a.size() >= b.size() ? a : b);
+    // Recurse ONLY on the large part to continue checking for splitting there.
+    if (a.size() >= b.size()) {
+      clusterPointsByGap(a, out, maxBoxes, gapThresholdKm, minClusterSize);
+    } else {
+      clusterPointsByGap(b, out, maxBoxes, gapThresholdKm, minClusterSize);
+    }
     return;
   }
 
@@ -475,8 +480,8 @@ void MultiFeedProcessor::buildGraphs() {
   std::vector<pfaedle::osm::BBoxIdx> bboxes;
   if (!unionPts.empty()) {
     std::vector<std::vector<LatLon>> clusters;
-    clusterPointsByGap(unionPts, &clusters, /*maxBoxes*/ 8,
-                       /*gapThresholdKm*/ 3000.0,
+    clusterPointsByGap(unionPts, &clusters, /*maxBoxes*/ 16,
+                       /*gapThresholdKm*/ 1000.0,
                        /*minClusterSize*/ 50);
 
     if (clusters.size() > 1) {
