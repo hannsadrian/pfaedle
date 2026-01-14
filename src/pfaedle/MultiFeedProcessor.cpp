@@ -467,7 +467,8 @@ void MultiFeedProcessor::buildGraphs() {
             << unionBox.getFullBox().getUpperRight().getX();
 
   // If stop coordinates contain multiple far-apart clusters (e.g. an overseas
-  // outlier feed), split into multiple bboxes to avoid exploding the OSM crop.
+  // outlier feed), keep only the largest cluster to avoid exploding the OSM crop.
+  // The outliers are assumed to be handled by a separate process/pipeline.
   // Heuristic thresholds (can be made configurable later):
   // - split when a largest geographic gap exceeds ~5000 km
   // - ignore tiny clusters (<2% or <250 points) as outliers
@@ -477,27 +478,47 @@ void MultiFeedProcessor::buildGraphs() {
     clusterPointsByGap(unionPts, &clusters, /*maxBoxes*/ 4,
                        /*gapThresholdKm*/ 5000.0,
                        /*minClusterSize*/ 250);
-    for (const auto &c : clusters) {
-      bboxes.push_back(bboxFromPoints(c, _cfg.boxPadding));
+
+    if (clusters.size() > 1) {
+      // Find largest cluster
+      size_t maxIdx = 0;
+      size_t maxSz = 0;
+      for (size_t i = 0; i < clusters.size(); ++i) {
+        if (clusters[i].size() > maxSz) {
+          maxSz = clusters[i].size();
+          maxIdx = i;
+        }
+      }
+      LOG(WARN) << "Found " << clusters.size()
+                << " disconnected clusters. Keeping only the largest one ("
+                << maxSz << " points). Other " << (clusters.size() - 1)
+                << " clusters will be ignored.";
+      for (size_t i = 0; i < clusters.size(); ++i) {
+        if (i == maxIdx) continue;
+        auto bb = bboxFromPoints(clusters[i], 0);
+        LOG(INFO) << "Ignored cluster " << i << " (" << clusters[i].size()
+                  << " points): http://bboxfinder.com/#"
+                  << bb.getFullBox().getLowerLeft().getY() << ","
+                  << bb.getFullBox().getLowerLeft().getX() << ","
+                  << bb.getFullBox().getUpperRight().getY() << ","
+                  << bb.getFullBox().getUpperRight().getX();
+      }
+      bboxes.push_back(bboxFromPoints(clusters[maxIdx], _cfg.boxPadding));
+    } else if (clusters.size() == 1) {
+      bboxes.push_back(bboxFromPoints(clusters[0], _cfg.boxPadding));
     }
   }
   if (bboxes.empty()) {
     bboxes.push_back(unionBox);
   }
-  if (bboxes.size() > 1) {
-    LOG(WARN) << "Stop coordinates form multiple far-apart clusters; splitting "
-                 "OSM crop into "
-              << bboxes.size() << " bounding boxes to avoid huge graphs.";
-    for (size_t i = 0; i < bboxes.size(); ++i) {
-      const auto &bb = bboxes[i].getFullBox();
-      LOG(INFO) << "BBox[" << i << "]: " << bb.getLowerLeft().getY() << ","
-                << bb.getLowerLeft().getX() << " to "
-                << bb.getUpperRight().getY() << "," << bb.getUpperRight().getX();
-      LOG(INFO) << "http://bboxfinder.com/#" << bb.getLowerLeft().getY() << ","
-                << bb.getLowerLeft().getX() << "," << bb.getUpperRight().getY()
-                << "," << bb.getUpperRight().getX();
-    }
-  }
+  
+  const auto &bb = bboxes[0].getFullBox();
+  LOG(INFO) << "Final BBox: " << bb.getLowerLeft().getY() << ","
+                    << bb.getLowerLeft().getX() << " to "
+                    << bb.getUpperRight().getY() << "," << bb.getUpperRight().getX();
+  LOG(INFO) << "http://bboxfinder.com/#" << bb.getLowerLeft().getY() << ","
+                    << bb.getLowerLeft().getX() << "," << bb.getUpperRight().getY()
+                    << "," << bb.getUpperRight().getX();
 
   // 2. Build Graphs per MotConfig
   for (auto &motCfg :
@@ -506,13 +527,39 @@ void MultiFeedProcessor::buildGraphs() {
     config::MotConfig *key = &motCfg;
     if (_bundles.count(key)) continue;
 
-    std::vector<GraphBundle> bundles;
-    bundles.reserve(bboxes.size());
-
     std::string osmPath = motCfg.osmPath.empty() ? _cfg.osmPath : motCfg.osmPath;
     if (osmPath.empty()) {
       throw std::runtime_error("No OSM path provided for MOT Config");
     }
+
+    // Reuse graph if another MotConfig has mathematically identical OSM build options
+    // and points to the same OSM file.
+    bool foundReuse = false;
+    for (auto &existing : _bundles) {
+      // existing.first is config::MotConfig*
+      // existing.second is std::vector<GraphBundle>
+      
+      const config::MotConfig *existingCfg = existing.first;
+      std::string existingOsmPath = existingCfg->osmPath.empty() ? _cfg.osmPath : existingCfg->osmPath;
+
+      if (existingOsmPath == osmPath && existingCfg->osmBuildOpts == motCfg.osmBuildOpts) {
+        LOG(INFO) << "Reusing already built graph for MOT Config ["
+                  << pfaedle::router::getMotStr(motCfg.mots) << "] from ["
+                  << pfaedle::router::getMotStr(existingCfg->mots) << "]";
+        _bundles[key] = existing.second; // Share the underlying shared_ptrs
+        foundReuse = true;
+        
+        // Ensure restrictive cache is unique per-thread later if modifyable,
+        // but here GraphBundle holds shared_ptr<Graph> and shared_ptr<Restrictor>.
+        // Since Restrictor is const during routing usually, sharing is okay.
+        // However, ShapeBuilder takes restrictor by raw pointer.
+        break;
+      }
+    }
+    if (foundReuse) continue;
+
+    std::vector<GraphBundle> bundles;
+    bundles.reserve(bboxes.size());
 
     for (size_t bbIdx = 0; bbIdx < bboxes.size(); ++bbIdx) {
       GraphBundle bundle;
@@ -686,6 +733,21 @@ void MultiFeedProcessor::processSingleFeed(int feedIdx) {
       continue;
     }
     auto &bundles = _bundles[&motCfg];
+
+    // Check if feed falls within the main bundle's bbox.
+    // If not, skip matching for this MOT.
+    // We only check against the first bundle since we kept only the largest cluster.
+    pfaedle::osm::BBoxIdx feedBox(0);
+    pfaedle::router::ShapeBuilder::getGtfsBox(
+        &feed, usedMots, "", _cfg.dropShapes, &feedBox, 0, nullptr, 0);
+
+    if (!util::geo::intersects(feedBox.getFullBox(),
+                               bundles[0].bbox.getFullBox())) {
+      LOG(WARN) << "Feed is outside the main OSM bounding box for MOT "
+                << pfaedle::router::getMotStr(usedMots)
+                << ". Skipping matching.";
+      continue;
+    }
 
     pfaedle::router::FeedStops fStops =
         pfaedle::router::writeMotStops(&feed, usedMots, _cfg.shapeTripId);
