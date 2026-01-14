@@ -470,14 +470,14 @@ void MultiFeedProcessor::buildGraphs() {
   // outlier feed), keep only the largest cluster to avoid exploding the OSM crop.
   // The outliers are assumed to be handled by a separate process/pipeline.
   // Heuristic thresholds (can be made configurable later):
-  // - split when a largest geographic gap exceeds ~5000 km
-  // - ignore tiny clusters (<2% or <250 points) as outliers
+  // - split when a largest geographic gap exceeds ~3000 km
+  // - ignore tiny clusters (<2% or <50 points) as outliers
   std::vector<pfaedle::osm::BBoxIdx> bboxes;
   if (!unionPts.empty()) {
     std::vector<std::vector<LatLon>> clusters;
-    clusterPointsByGap(unionPts, &clusters, /*maxBoxes*/ 4,
-                       /*gapThresholdKm*/ 5000.0,
-                       /*minClusterSize*/ 250);
+    clusterPointsByGap(unionPts, &clusters, /*maxBoxes*/ 8,
+                       /*gapThresholdKm*/ 3000.0,
+                       /*minClusterSize*/ 50);
 
     if (clusters.size() > 1) {
       // Find largest cluster
