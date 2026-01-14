@@ -385,6 +385,9 @@ void MultiFeedProcessor::buildGraphs() {
               // Don't add to unionBox yet, let clustering handle that.
               // Just collect points.
               unionPts.push_back({s.lat, s.lon});
+              unionBox.add(
+                  util::geo::Box<double>(util::geo::DPoint(s.lon, s.lat),
+                                         util::geo::DPoint(s.lon, s.lat)));
               if (s.lat < minLat) {
                 minLat = s.lat;
                 minLatStop = s.id + " / " + s.name + " (" +
@@ -457,17 +460,22 @@ void MultiFeedProcessor::buildGraphs() {
             << "," << unionBox.getFullBox().getLowerLeft().getX() << " to "
             << unionBox.getFullBox().getUpperRight().getY() << ","
             << unionBox.getFullBox().getUpperRight().getX();
+  LOG(INFO) << "http://bboxfinder.com/#"
+            << unionBox.getFullBox().getLowerLeft().getY() << ","
+            << unionBox.getFullBox().getLowerLeft().getX() << ","
+            << unionBox.getFullBox().getUpperRight().getY() << ","
+            << unionBox.getFullBox().getUpperRight().getX();
 
   // If stop coordinates contain multiple far-apart clusters (e.g. an overseas
   // outlier feed), split into multiple bboxes to avoid exploding the OSM crop.
   // Heuristic thresholds (can be made configurable later):
-  // - split when a largest geographic gap exceeds ~1000 km
+  // - split when a largest geographic gap exceeds ~5000 km
   // - ignore tiny clusters (<2% or <250 points) as outliers
   std::vector<pfaedle::osm::BBoxIdx> bboxes;
   if (!unionPts.empty()) {
     std::vector<std::vector<LatLon>> clusters;
     clusterPointsByGap(unionPts, &clusters, /*maxBoxes*/ 4,
-                       /*gapThresholdKm*/ 1000.0,
+                       /*gapThresholdKm*/ 5000.0,
                        /*minClusterSize*/ 250);
     for (const auto &c : clusters) {
       bboxes.push_back(bboxFromPoints(c, _cfg.boxPadding));
@@ -485,6 +493,9 @@ void MultiFeedProcessor::buildGraphs() {
       LOG(INFO) << "BBox[" << i << "]: " << bb.getLowerLeft().getY() << ","
                 << bb.getLowerLeft().getX() << " to "
                 << bb.getUpperRight().getY() << "," << bb.getUpperRight().getX();
+      LOG(INFO) << "http://bboxfinder.com/#" << bb.getLowerLeft().getY() << ","
+                << bb.getLowerLeft().getX() << "," << bb.getUpperRight().getY()
+                << "," << bb.getUpperRight().getX();
     }
   }
 
