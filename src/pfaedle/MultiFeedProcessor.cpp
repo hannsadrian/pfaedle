@@ -71,7 +71,18 @@ static void splitByLargestGap(const std::vector<LatLon> &pts, bool splitLon,
   for (size_t i = 0; i + 1 < sorted->size(); ++i) {
     const auto &p1 = (*sorted)[i];
     const auto &p2 = (*sorted)[i + 1];
-    const double d = haversineKm(p1.lat, p1.lon, p2.lat, p2.lon);
+    
+    // Fix: Measure gap strictly along the sorting dimension.
+    // Previously used diagonal haversine distance potentially triggered false
+    // splits when points were close in sorted rank but far in the other dimension.
+    double d;
+    if (splitLon) {
+      double avgLat = (p1.lat + p2.lat) / 2.0;
+      d = haversineKm(avgLat, p1.lon, avgLat, p2.lon);
+    } else {
+      d = haversineKm(p1.lat, p1.lon, p2.lat, p1.lon);
+    }
+
     if (d > gapKm) {
       gapKm = d;
       gapIdx = i + 1; // split before this index
